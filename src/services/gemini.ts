@@ -1,6 +1,10 @@
 import { GeminiResult } from '../types';
 import { GEMINI_MODEL } from '../utils/constants';
 
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [2000, 5000];
+const RETRYABLE_STATUS = new Set([429, 503]);
+
 export async function summarizeAndTranslate(
   title: string,
   content: string,
@@ -30,21 +34,51 @@ Source: ${sourceName}
 Respond in this exact JSON format:
 {"summary": "paragraph 1\\n\\nparagraph 2\\n\\nparagraph 3", "category": "ai", "relevance_score": 4}`;
 
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 1024,
-          responseMimeType: 'application/json',
-        },
-      }),
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const requestBody = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 1024,
+      responseMimeType: 'application/json',
+    },
+  });
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callGemini(url, requestBody);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const status = (lastError as GeminiError).status;
+      const retryable = status !== undefined && RETRYABLE_STATUS.has(status);
+
+      if (attempt < MAX_ATTEMPTS && retryable) {
+        const delay = RETRY_DELAYS_MS[attempt - 1];
+        console.warn(
+          `gemini: attempt ${attempt}/${MAX_ATTEMPTS} failed (${lastError.message}), retrying in ${delay}ms...`
+        );
+        await sleep(delay);
+        continue;
+      }
+      throw lastError;
     }
-  );
+  }
+
+  throw lastError || new Error('gemini: exhausted retries');
+}
+
+interface GeminiError extends Error {
+  status?: number;
+}
+
+async function callGemini(url: string, body: string): Promise<GeminiResult> {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
 
   if (!resp.ok) {
     let detail = '';
@@ -52,8 +86,13 @@ Respond in this exact JSON format:
       const errBody = (await resp.json()) as { error?: { message?: string } };
       detail = errBody.error?.message || '';
     } catch {}
-    if (resp.status === 429) throw new Error(`RATE_LIMITED: ${detail || 'quota exceeded'}`);
-    throw new Error(`Gemini API error ${resp.status}: ${detail || 'unknown'}`);
+    const err: GeminiError = new Error(
+      resp.status === 429
+        ? `RATE_LIMITED: ${detail || 'quota exceeded'}`
+        : `Gemini API error ${resp.status}: ${detail || 'unknown'}`
+    );
+    err.status = resp.status;
+    throw err;
   }
 
   const data = (await resp.json()) as {
@@ -66,7 +105,12 @@ Respond in this exact JSON format:
   const parsed: GeminiResult = JSON.parse(text);
   if (!parsed.summary) throw new Error('No summary in Gemini response');
   if (!parsed.category) throw new Error('No category in Gemini response');
-  if (typeof parsed.relevance_score !== 'number') throw new Error('No relevance_score in Gemini response');
+  if (typeof parsed.relevance_score !== 'number')
+    throw new Error('No relevance_score in Gemini response');
 
   return parsed;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

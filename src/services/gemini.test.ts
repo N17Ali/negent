@@ -10,6 +10,13 @@ const OK_RESPONSE = (text: string) =>
     }),
   }) as unknown as Response;
 
+const ERR_RESPONSE = (status: number, message: string) =>
+  ({
+    ok: false,
+    status,
+    json: async () => ({ error: { message } }),
+  }) as unknown as Response;
+
 const VALID_RESULT = JSON.stringify({
   summary: 'خلاصه تست',
   category: 'ai',
@@ -22,10 +29,12 @@ describe('summarizeAndTranslate', () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it('returns summary, category, and relevance_score from Gemini JSON', async () => {
@@ -56,26 +65,46 @@ describe('summarizeAndTranslate', () => {
     expect(url).toContain('key=SECRET_KEY');
   });
 
-  it('throws RATE_LIMITED on 429', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 429,
-      json: async () => ({ error: { message: 'quota exceeded' } }),
-    } as Response);
-    await expect(summarizeAndTranslate('T', 'C', 'S', 'K')).rejects.toThrow(
-      'RATE_LIMITED: quota exceeded'
-    );
+  it('retries on 503 and succeeds on second attempt', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ERR_RESPONSE(503, 'high demand'))
+      .mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    const promise = summarizeAndTranslate('T', 'C', 'S', 'K');
+    await vi.advanceTimersByTimeAsync(2000);
+    const out = await promise;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(out.summary).toBe('خلاصه تست');
   });
 
-  it('throws on non-ok response', async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: { message: 'internal error' } }),
-    } as Response);
+  it('retries on 429 and succeeds on third attempt', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    const promise = summarizeAndTranslate('T', 'C', 'S', 'K');
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(5000);
+    const out = await promise;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(out.summary).toBe('خلاصه تست');
+  });
+
+  it('throws RATE_LIMITED after max retries on 429', async () => {
+    fetchMock.mockResolvedValue(ERR_RESPONSE(429, 'quota exceeded'));
+    const promise = summarizeAndTranslate('T', 'C', 'S', 'K');
+    promise.catch(() => {});
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(promise).rejects.toThrow('RATE_LIMITED: quota exceeded');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws on non-retryable error immediately (500)', async () => {
+    fetchMock.mockResolvedValueOnce(ERR_RESPONSE(500, 'internal error'));
     await expect(summarizeAndTranslate('T', 'C', 'S', 'K')).rejects.toThrow(
       'Gemini API error 500: internal error'
     );
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('throws on empty candidates', async () => {
@@ -83,6 +112,7 @@ describe('summarizeAndTranslate', () => {
     await expect(summarizeAndTranslate('T', 'C', 'S', 'K')).rejects.toThrow(
       'Empty Gemini response'
     );
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('throws when summary field is missing', async () => {

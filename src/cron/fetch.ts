@@ -1,9 +1,14 @@
 import { Env } from '../types';
 import { parseFeed, computeUrlHash } from '../services/rss';
-import { getNextSource, advanceSourceOrder, batchInsertArticles, ArticleInsert } from '../db';
+import { getNextSource, advanceSourceOrder, batchInsertArticles, ArticleInsert, cleanupOldArticles } from '../db';
 import { isRelevantArticle } from '../utils/filter';
 
 export async function fetchCron(env: Env): Promise<void> {
+  const cleanup = await cleanupOldArticles(env.DB);
+  if (cleanup.meta.changes) {
+    console.log(`fetch: cleaned up ${cleanup.meta.changes} old articles`);
+  }
+
   const source = await getNextSource(env.DB);
   if (!source) {
     console.log('fetch: no active sources');

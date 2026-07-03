@@ -259,3 +259,13 @@ export function isAdmin(db: D1Database, chatId: number) {
 export function getAllSources(db: D1Database) {
   return db.prepare('SELECT * FROM sources ORDER BY name').all<Source>();
 }
+
+export function cleanupOldArticles(db: D1Database) {
+  return db
+    .prepare(
+      `DELETE FROM articles
+       WHERE fetched_at < datetime('now', '-48 hours')
+       AND (status IN ('done', 'failed') OR delivered = 1)`
+    )
+    .run();
+}
