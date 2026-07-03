@@ -28,13 +28,13 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     console.log(`cron triggered: "${event.cron}"`);
     switch (event.cron) {
-      case '*/20 * * * *':
+      case '*/10 * * * *':
         ctx.waitUntil(fetchCron(env));
         break;
-      case '1-59/20 * * * *':
+      case '1-59/10 * * * *':
         ctx.waitUntil(processCron(env));
         break;
-      case '0,30 * * * *':
+      case '0,15,30,45 * * * *':
         ctx.waitUntil(deliverCron(env));
         break;
       default:

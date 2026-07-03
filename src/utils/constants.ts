@@ -4,7 +4,7 @@ export const MAX_MESSAGE_LENGTH = 4090;
 export const MAX_ARTICLES_PER_DELIVERY = 10;
 export const MAX_RETRY_COUNT = 3;
 export const PROCESSING_TIMEOUT_MINUTES = 10;
-export const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 
 export const MIN_RELEVANCE_SCORE = 3;
 
