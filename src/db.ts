@@ -38,6 +38,43 @@ export function insertArticle(
     .run();
 }
 
+export interface ArticleInsert {
+  sourceId: number;
+  urlHash: string;
+  url: string;
+  title: string;
+  contentSnippet: string | null;
+  mediaUrl: string | null;
+  mediaType: string | null;
+  publishedAt: string | null;
+}
+
+export function batchInsertArticles(
+  db: D1Database,
+  articles: ArticleInsert[]
+): Promise<D1Result[]> {
+  if (!articles.length) return Promise.resolve([]);
+  const stmts = articles.map((a) =>
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO articles
+         (source_id, url_hash, url, title, content_snippet, media_url, media_type, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        a.sourceId,
+        a.urlHash,
+        a.url,
+        a.title,
+        a.contentSnippet,
+        a.mediaUrl,
+        a.mediaType,
+        a.publishedAt
+      )
+  );
+  return db.batch(stmts);
+}
+
 export function unstickProcessing(db: D1Database) {
   return db
     .prepare(
@@ -53,7 +90,8 @@ export function getNextRawArticle(db: D1Database) {
     .prepare(
       `SELECT a.*, s.name as source_name FROM articles a
        LEFT JOIN sources s ON a.source_id = s.id
-       WHERE a.status = 'raw' OR (a.status = 'failed' AND a.retry_count < 3)
+       WHERE (a.status = 'raw' OR (a.status = 'failed' AND a.retry_count < 3))
+       AND a.fetched_at > datetime('now', '-48 hours')
        ORDER BY CASE a.status WHEN 'raw' THEN 0 ELSE 1 END, a.fetched_at ASC
        LIMIT 1`
     )
@@ -70,13 +108,19 @@ export function lockArticle(db: D1Database, articleId: number) {
     .run();
 }
 
-export function markArticleDone(db: D1Database, articleId: number, summaryFa: string) {
+export function markArticleDone(
+  db: D1Database,
+  articleId: number,
+  summaryFa: string,
+  category: string,
+  relevanceScore: number
+) {
   return db
     .prepare(
-      `UPDATE articles SET status = 'done', summary_fa = ?, processed_at = datetime('now')
-       WHERE id = ?`
+      `UPDATE articles SET status = 'done', summary_fa = ?, category = ?, relevance_score = ?,
+       processed_at = datetime('now') WHERE id = ?`
     )
-    .bind(summaryFa, articleId)
+    .bind(summaryFa, category, relevanceScore, articleId)
     .run();
 }
 
@@ -95,8 +139,8 @@ export function getUndeliveredArticles(db: D1Database, limit: number) {
     .prepare(
       `SELECT a.*, s.name as source_name FROM articles a
        JOIN sources s ON a.source_id = s.id
-       WHERE a.status = 'done' AND a.delivered = 0
-       ORDER BY a.published_at ASC NULLS LAST
+       WHERE a.status = 'done' AND a.delivered = 0 AND a.relevance_score >= 3
+       ORDER BY a.relevance_score DESC, a.published_at DESC NULLS LAST
        LIMIT ?`
     )
     .bind(limit)

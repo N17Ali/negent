@@ -16,6 +16,8 @@ function makeArticle(overrides: Partial<Article> = {}): Article {
     fetched_at: '2024-01-01',
     status: 'done',
     summary_fa: 'Summary text.',
+    category: null,
+    relevance_score: null,
     processed_at: null,
     error_message: null,
     retry_count: 0,

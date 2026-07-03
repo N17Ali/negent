@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS articles (
   fetched_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   status          TEXT    NOT NULL DEFAULT 'raw',
   summary_fa      TEXT,
+  category        TEXT,
+  relevance_score INTEGER,
   processed_at    TEXT,
   error_message   TEXT,
   retry_count     INTEGER NOT NULL DEFAULT 0,
@@ -31,7 +33,7 @@ CREATE TABLE IF NOT EXISTS articles (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_url_hash ON articles(url_hash);
 CREATE INDEX IF NOT EXISTS idx_articles_status ON articles(status, fetched_at);
-CREATE INDEX IF NOT EXISTS idx_articles_delivery ON articles(status, delivered, processed_at);
+CREATE INDEX IF NOT EXISTS idx_articles_delivery ON articles(status, delivered, relevance_score DESC, published_at DESC);
 
 CREATE TABLE IF NOT EXISTS subscribers (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,6 +1,7 @@
 import { Env } from '../types';
 import { parseFeed, computeUrlHash } from '../services/rss';
-import { getNextSource, advanceSourceOrder, insertArticle } from '../db';
+import { getNextSource, advanceSourceOrder, batchInsertArticles, ArticleInsert } from '../db';
+import { isRelevantArticle } from '../utils/filter';
 
 export async function fetchCron(env: Env): Promise<void> {
   const source = await getNextSource(env.DB);
@@ -30,24 +31,35 @@ export async function fetchCron(env: Env): Promise<void> {
   const items = parseFeed(xml);
   console.log(`fetch: ${source.name} parsed ${items.length} items`);
 
-  let inserted = 0;
+  let skipped = 0;
+  const toInsert: ArticleInsert[] = [];
   for (const item of items) {
     if (!item.link) continue;
+    if (!isRelevantArticle(item.title, item.description || '')) {
+      skipped++;
+      continue;
+    }
     const urlHash = await computeUrlHash(item.link);
-    const result = await insertArticle(
-      env.DB,
-      source.id,
+    toInsert.push({
+      sourceId: source.id,
       urlHash,
-      item.link,
-      item.title,
-      item.description || null,
-      item.mediaUrl,
-      item.mediaType,
-      item.pubDate
-    );
-    if (result.meta.changes) inserted++;
+      url: item.link,
+      title: item.title,
+      contentSnippet: item.description || null,
+      mediaUrl: item.mediaUrl,
+      mediaType: item.mediaType,
+      publishedAt: item.pubDate,
+    });
   }
 
-  console.log(`fetch: ${source.name} inserted ${inserted} new articles`);
+  let inserted = 0;
+  if (toInsert.length) {
+    const results = await batchInsertArticles(env.DB, toInsert);
+    inserted = results.filter((r) => r.meta.changes).length;
+  }
+
+  console.log(
+    `fetch: ${source.name} inserted ${inserted} new, skipped ${skipped} irrelevant`
+  );
   await advanceSourceOrder(env.DB, source.id);
 }
