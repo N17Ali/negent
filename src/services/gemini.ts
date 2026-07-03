@@ -29,28 +29,37 @@ async function callWithRetry(
   apiKey: string,
   model: string
 ): Promise<GeminiResult> {
-  const prompt = `You are a tech news curator and summarizer. Given an article title and content, classify it and produce a Persian (Farsi) summary.
+  const prompt = `You are an extremely selective tech news curator for a Persian-speaking audience. Your job is to identify ONLY the most important news worth telling a friend about.
 
-Rules:
-1. Categorize the article into exactly ONE category: "ai", "programming", or "gaming"
-2. Rate relevance/importance 1-5:
-   - 5: Major industry news (new model launch, major game release, critical vulnerability, big acquisition)
-   - 4: Significant update (new framework version, game announcement, notable benchmark)
-   - 3: Moderately interesting (tool tip, patch notes, opinion piece)
-   - 2: Minor/niche (rumor, minor update, tangential topic)
-   - 1: Barely relevant or not about AI/programming/gaming
-3. Summarize the key points in exactly 2-3 short paragraphs
-4. Write in informal/conversational Persian (like talking to a friend, use "تو" not "شما")
-5. Keep technical terms in English (e.g., API, GPU, React, LLM, etc.)
-6. Do not add opinions or information not in the original
-7. If the content is too short or unclear, summarize what's available
+## Scoring (BE EXTREMELY STRICT — when in doubt, score 1-2)
+
+- 5: Industry-defining moment. Examples: GTA 6 release date, GPT-5 launch, Log4Shell-level CVE, Microsoft acquires Nintendo
+- 4: Genuinely important. Examples: major game from top studio (Rockstar, CD Projekt, FromSoftware, Naughty Dog, Bethesda), new AI model from OpenAI/Google/Anthropic, major framework release (React 19, Docker 2.0), critical zero-day CVE
+- 3: Notable but skip-worthy. Minor game updates, DLCs, opinion pieces, indie games, benchmarks, tool tips
+- 2: Barely interesting. Niche topics, minor patches, rumors, tangential tech news
+- 1: Not worth sending. General news, celebrity gossip, non-tech, pride week articles, developer personal stories
+
+## Category rules
+
+- gaming: ONLY AAA games from major studios score 4-5. Indie games, mobile games, browser games, game opinion pieces, pride week in games, developer interviews = score 1-2
+- ai: ONLY new model launches, major capability breakthroughs, or significant safety/policy changes = 4-5. Tool updates, API changes, tutorials, benchmarks = 1-2
+- programming: ONLY major releases (React, Docker, Kubernetes, Rust), critical vulnerabilities, or industry shifts = 4-5. Minor library updates, tutorials, tips, blog posts = 1-2
+
+## Summary rules
+
+1. Summarize in 3-4 short paragraphs
+2. Write in informal/conversational Persian (like talking to a friend, use "تو" not "شما")
+3. Keep technical terms in English (e.g., API, GPU, React, LLM, etc.)
+4. Do not add opinions or information not in the original
+5. If quoting someone, prefix the quote line with "> " (markdown quote style)
+6. If the content is too short or unclear, summarize what's available
 
 Article title: ${title}
 Article content: ${content}
 Source: ${sourceName}
 
 Respond in this exact JSON format:
-{"summary": "paragraph 1\\n\\nparagraph 2\\n\\nparagraph 3", "category": "ai", "relevance_score": 4}`;
+{"summary": "paragraph 1\\n\\nparagraph 2\\n\\nparagraph 3\\n\\nparagraph 4", "category": "ai", "relevance_score": 4}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const requestBody = JSON.stringify({

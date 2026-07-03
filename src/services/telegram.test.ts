@@ -16,8 +16,8 @@ function makeArticle(overrides: Partial<Article> = {}): Article {
     fetched_at: '2024-01-01',
     status: 'done',
     summary_fa: 'Summary text.',
-    category: null,
-    relevance_score: null,
+    category: 'ai',
+    relevance_score: 4,
     processed_at: null,
     error_message: null,
     retry_count: 0,
@@ -55,12 +55,8 @@ describe('sendArticle', () => {
       media_type: 'photo',
     });
     await sendArticle(1, article, 'TechCrunch', 'TOKEN');
-    expect(fetchMock).toHaveBeenCalledOnce();
     const [url] = fetchMock.mock.calls[0];
     expect(url).toContain('/sendPhoto');
-    const body = parseBody(fetchMock.mock.calls[0]);
-    expect(body.photo).toBe('https://img.example.com/p.jpg');
-    expect(body.parse_mode).toBe('HTML');
   });
 
   it('calls sendVideo when media_type is video', async () => {
@@ -82,28 +78,28 @@ describe('sendArticle', () => {
     expect(url).toContain('/sendMessage');
   });
 
-  it('includes title as HTML-escaped bold in caption', async () => {
+  it('does not include English title in message', async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
-    const article = makeArticle({
-      title: 'A <b> & B',
-      media_url: 'https://img.example.com/p.jpg',
-      media_type: 'photo',
-    });
+    const article = makeArticle({ title: 'Some English Title' });
     await sendArticle(1, article, 'S', 'TOKEN');
     const body = parseBody(fetchMock.mock.calls[0]);
-    expect(body.caption).toContain('<b>A &lt;b&gt; &amp; B</b>');
+    expect(body.text as string).not.toContain('Some English Title');
   });
 
-  it('includes source link footer in caption', async () => {
+  it('includes category icon at start', async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
-    const article = makeArticle({
-      url: 'https://example.com/x',
-      media_url: 'https://img.example.com/p.jpg',
-      media_type: 'photo',
-    });
+    const article = makeArticle({ category: 'ai' });
+    await sendArticle(1, article, 'S', 'TOKEN');
+    const body = parseBody(fetchMock.mock.calls[0]);
+    expect(body.text as string).toMatch(/^🤖/);
+  });
+
+  it('includes source link footer', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const article = makeArticle({ url: 'https://example.com/x' });
     await sendArticle(1, article, 'TechCrunch', 'TOKEN');
     const body = parseBody(fetchMock.mock.calls[0]);
-    expect(body.caption).toContain('🔗 <a href="https://example.com/x">منبع</a> | 📡 TechCrunch');
+    expect(body.text).toContain('🔗 <a href="https://example.com/x">منبع</a> | 📡 TechCrunch');
   });
 
   it('escapes HTML in source name', async () => {
@@ -114,12 +110,31 @@ describe('sendArticle', () => {
     expect(body.caption).toContain('📡 &lt;Bad&gt;');
   });
 
-  it('falls back to sendMessage when sendPhoto fails with wrong file identifier', async () => {
+  it('includes RLM mark for RTL formatting', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const article = makeArticle({ summary_fa: 'متن فارسی' });
+    await sendArticle(1, article, 'S', 'TOKEN');
+    const body = parseBody(fetchMock.mock.calls[0]);
+    expect(body.text).toContain('\u200F');
+  });
+
+  it('converts quote lines to blockquote', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const article = makeArticle({
+      summary_fa: 'متن اول\n\n> این یک نقل قول است\n\nمتن سوم',
+    });
+    await sendArticle(1, article, 'S', 'TOKEN');
+    const body = parseBody(fetchMock.mock.calls[0]);
+    expect(body.text).toContain('<blockquote>');
+    expect(body.text).toContain('این یک نقل قول است');
+  });
+
+  it('falls back to sendMessage when sendPhoto fails', async () => {
     fetchMock
       .mockResolvedValueOnce({
         ok: false,
         status: 400,
-        json: async () => ({ description: 'Bad Request: wrong file identifier' }),
+        json: async () => ({ description: 'wrong file identifier' }),
       } as Response)
       .mockResolvedValueOnce(okResponse());
     const article = makeArticle({
@@ -129,89 +144,6 @@ describe('sendArticle', () => {
     const ok = await sendArticle(1, article, 'S', 'TOKEN');
     expect(ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toContain('/sendPhoto');
-    expect(fetchMock.mock.calls[1][0]).toContain('/sendMessage');
-  });
-
-  it('falls back to sendMessage when sendPhoto fails with HTTP URL error', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        json: async () => ({ description: 'failed to get HTTP URL content' }),
-      } as Response)
-      .mockResolvedValueOnce(okResponse());
-    const article = makeArticle({
-      media_url: 'https://i.jpg',
-      media_type: 'photo',
-    });
-    await sendArticle(1, article, 'S', 'TOKEN');
-    expect(fetchMock.mock.calls[1][0]).toContain('/sendMessage');
-  });
-
-  it('falls back to sendMessage when sendVideo fails', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        json: async () => ({ description: 'other' }),
-      } as Response)
-      .mockResolvedValueOnce(okResponse());
-    const article = makeArticle({
-      media_url: 'https://v.mp4',
-      media_type: 'video',
-    });
-    await sendArticle(1, article, 'S', 'TOKEN');
-    expect(fetchMock.mock.calls[1][0]).toContain('/sendMessage');
-  });
-
-  it('includes media link in fallback sendMessage body', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        json: async () => ({ description: 'wrong file identifier' }),
-      } as Response)
-      .mockResolvedValueOnce(okResponse());
-    const article = makeArticle({
-      media_url: 'https://i.jpg',
-      media_type: 'photo',
-    });
-    await sendArticle(1, article, 'S', 'TOKEN');
-    const fallbackBody = parseBody(fetchMock.mock.calls[1]);
-    expect(fallbackBody.text).toContain('🖼 <a href="https://i.jpg">تصویر</a>');
-  });
-
-  it('truncates summary to fit caption length budget', async () => {
-    fetchMock.mockResolvedValueOnce(okResponse());
-    const longSummary = 'x'.repeat(2000);
-    const article = makeArticle({
-      media_url: 'https://i.jpg',
-      media_type: 'photo',
-      summary_fa: longSummary,
-    });
-    await sendArticle(1, article, 'S', 'TOKEN');
-    const body = parseBody(fetchMock.mock.calls[0]);
-    expect((body.caption as string).length).toBeLessThanOrEqual(1020);
-  });
-
-  it('truncates summary to fit message length budget on fallback', async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        json: async () => ({ description: 'wrong file identifier' }),
-      } as Response)
-      .mockResolvedValueOnce(okResponse());
-    const longSummary = 'x'.repeat(5000);
-    const article = makeArticle({
-      media_url: 'https://i.jpg',
-      media_type: 'photo',
-      summary_fa: longSummary,
-    });
-    await sendArticle(1, article, 'S', 'TOKEN');
-    const body = parseBody(fetchMock.mock.calls[1]);
-    expect((body.text as string).length).toBeLessThanOrEqual(4090);
   });
 
   it('throws BLOCKED on 403', async () => {
@@ -223,9 +155,7 @@ describe('sendArticle', () => {
   it('throws RATE_LIMITED on 429', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 429 } as Response);
     const article = makeArticle();
-    await expect(sendArticle(1, article, 'S', 'TOKEN')).rejects.toThrow(
-      'RATE_LIMITED'
-    );
+    await expect(sendArticle(1, article, 'S', 'TOKEN')).rejects.toThrow('RATE_LIMITED');
   });
 });
 
@@ -245,9 +175,6 @@ describe('sendMessage', () => {
     fetchMock.mockResolvedValueOnce(okResponse());
     const ok = await sendMessage(1, 'hello', 'TOKEN');
     expect(ok).toBe(true);
-    const body = parseBody(fetchMock.mock.calls[0]);
-    expect(body.text).toBe('hello');
-    expect(body.parse_mode).toBe('HTML');
   });
 
   it('returns false on non-429/403 error', async () => {

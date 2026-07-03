@@ -139,12 +139,23 @@ export function getUndeliveredArticles(db: D1Database, limit: number) {
     .prepare(
       `SELECT a.*, s.name as source_name FROM articles a
        JOIN sources s ON a.source_id = s.id
-       WHERE a.status = 'done' AND a.delivered = 0 AND a.relevance_score >= 3
-       ORDER BY a.relevance_score DESC, a.published_at DESC NULLS LAST
+       WHERE a.status = 'done' AND a.delivered = 0 AND a.relevance_score >= 4
+       ORDER BY a.processed_at DESC
        LIMIT ?`
     )
     .bind(limit)
     .all<Article & { source_name: string }>();
+}
+
+export function getRecentDeliveredTitles(db: D1Database, limit: number) {
+  return db
+    .prepare(
+      `SELECT DISTINCT a.title FROM articles a
+       WHERE a.delivered = 1
+       ORDER BY a.delivered_at DESC LIMIT ?`
+    )
+    .bind(limit)
+    .all<{ title: string }>();
 }
 
 export function markDelivered(db: D1Database, articleId: number) {

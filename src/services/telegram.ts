@@ -1,5 +1,7 @@
-import { Article, Source } from '../types';
-import { MAX_CAPTION_LENGTH, MAX_MESSAGE_LENGTH, ARTICLES_PER_MESSAGE } from '../utils/constants';
+import { Article } from '../types';
+import { MAX_CAPTION_LENGTH, MAX_MESSAGE_LENGTH } from '../utils/constants';
+
+const RLM = '\u200F';
 
 export async function sendArticle(
   chatId: number,
@@ -21,54 +23,6 @@ export async function sendArticle(
   }
 
   return sendMessage(chatId, message, botToken);
-}
-
-export async function sendArticleBatch(
-  chatId: number,
-  articles: (Article & { source_name: string })[],
-  botToken: string
-): Promise<boolean> {
-  const message = formatBatchMessage(articles);
-  return sendMessage(chatId, message, botToken);
-}
-
-function formatBatchMessage(articles: (Article & { source_name: string })[]): string {
-  const separator = '\n\n━━━━━━━━━━\n\n';
-  const blocks = articles.map((a) => formatSingleInBatch(a));
-  return blocks.join(separator);
-}
-
-function formatSingleInBatch(article: Article & { source_name: string }): string {
-  const title = `<b>${escapeHtml(article.title)}</b>`;
-  const footer = `\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(article.source_name)}`;
-  const mediaLine = article.media_url ? ` | 🖼 <a href="${article.media_url}">تصویر</a>` : '';
-  const catIcon = categoryIcon(article.category);
-  const header = `${catIcon} `;
-  const footerLen = footer.length + mediaLine.length + header.length + 4;
-  const available = Math.floor((MAX_MESSAGE_LENGTH - footerLen) / articles_count_safe());
-  const summary = truncate(article.summary_fa || '', available);
-  return `${header}${title}\n\n${summary}\n${footer}${mediaLine}`;
-}
-
-function articles_count_safe(): number {
-  return ARTICLES_PER_MESSAGE;
-}
-
-function formatCaption(article: Article, sourceName: string): string {
-  const title = `<b>${escapeHtml(article.title)}</b>`;
-  const footer = `\n\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(sourceName)}`;
-  const available = MAX_CAPTION_LENGTH - title.length - footer.length - 4;
-  const summary = truncate(article.summary_fa || '', available);
-  return `${title}\n\n${summary}${footer}`;
-}
-
-function formatMessage(article: Article, sourceName: string): string {
-  const title = `<b>${escapeHtml(article.title)}</b>`;
-  const footer = `\n\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(sourceName)}`;
-  const mediaLine = article.media_url ? `\n\n🖼 <a href="${article.media_url}">تصویر</a>` : '';
-  const available = MAX_MESSAGE_LENGTH - title.length - footer.length - mediaLine.length - 4;
-  const summary = truncate(article.summary_fa || '', available);
-  return `${title}\n\n${summary}${footer}${mediaLine}`;
 }
 
 async function sendPhoto(
@@ -108,6 +62,48 @@ async function sendVideo(
   });
   if (resp.ok) return true;
   return false;
+}
+
+function formatCaption(article: Article, sourceName: string): string {
+  const catIcon = categoryIcon(article.category);
+  const footer = `\n\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(sourceName)}`;
+  const summary = formatSummary(article.summary_fa || '');
+  const available = MAX_CAPTION_LENGTH - footer.length - catIcon.length - 4;
+  const truncated = truncate(summary, available);
+  return `${catIcon}\n\n${truncated}${footer}`;
+}
+
+function formatMessage(article: Article, sourceName: string): string {
+  const catIcon = categoryIcon(article.category);
+  const footer = `\n\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(sourceName)}`;
+  const mediaLine = article.media_url
+    ? ` | 🖼 <a href="${article.media_url}">تصویر</a>`
+    : '';
+  const summary = formatSummary(article.summary_fa || '');
+  const available = MAX_MESSAGE_LENGTH - footer.length - mediaLine.length - catIcon.length - 4;
+  const truncated = truncate(summary, available);
+  return `${catIcon}\n\n${truncated}${footer}${mediaLine}`;
+}
+
+function formatSummary(summary: string): string {
+  const paragraphs = summary.split(/\n\n+/);
+  return paragraphs
+    .map((p) => {
+      const trimmed = p.trim();
+      if (trimmed.startsWith('> ')) {
+        const quoteText = trimmed.slice(2);
+        return `<blockquote>${RLM}${escapeHtmlPreserveLinks(quoteText)}</blockquote>`;
+      }
+      return `${RLM}${escapeHtmlPreserveLinks(trimmed)}`;
+    })
+    .join('\n\n');
+}
+
+function escapeHtmlPreserveLinks(text: string): string {
+  return text
+    .replace(/&(?!(?:amp|lt|gt|quot|#39);)/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 export async function sendMessage(
@@ -158,9 +154,13 @@ function truncate(text: string, maxLen: number): string {
 
 function categoryIcon(category: string | null): string {
   switch (category) {
-    case 'ai': return '🤖';
-    case 'programming': return '💻';
-    case 'gaming': return '🎮';
-    default: return '📰';
+    case 'ai':
+      return '🤖';
+    case 'programming':
+      return '💻';
+    case 'gaming':
+      return '🎮';
+    default:
+      return '📰';
   }
 }
