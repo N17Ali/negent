@@ -52,9 +52,10 @@ describe('selectTopArticles', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://integrate.api.nvidia.com/v1/chat/completions');
     const body = JSON.parse(init.body);
-    expect(body.model).toBe('deepseek-ai/deepseek-r1');
+    expect(body.model).toBe('deepseek-ai/deepseek-v4-pro');
     expect(body.messages[0].content).toContain('GTA 6');
-    expect(body.response_format.type).toBe('json_object');
+    expect(body.chat_template_kwargs).toEqual({ thinking: false });
+    expect(body.stream).toBe(false);
   });
 
   it('includes API key as Bearer token', async () => {

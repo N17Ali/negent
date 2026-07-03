@@ -1,5 +1,7 @@
 import { BATCH_SELECT_SIZE, SELECT_TOP_N } from '../utils/constants';
 
+export const DEEPSEEK_MODEL = 'deepseek-ai/deepseek-v4-pro';
+
 export interface ArticleCandidate {
   id: number;
   title: string;
@@ -61,11 +63,13 @@ Select exactly ${SELECT_TOP_N} articles. Respond in this exact JSON format:
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'deepseek-ai/deepseek-r1',
+      model: DEEPSEEK_MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
-      max_tokens: 2000,
-      response_format: { type: 'json_object' },
+      top_p: 0.95,
+      max_tokens: 16384,
+      chat_template_kwargs: { thinking: false },
+      stream: false,
     }),
   });
 
