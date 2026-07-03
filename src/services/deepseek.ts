@@ -31,21 +31,16 @@ export async function selectTopArticles(
     )
     .join(',\n');
 
-  const prompt = `You are an extremely selective tech news curator for a Persian-speaking audience. Select the ${SELECT_TOP_N} most important articles worth telling a friend about.
+  const prompt = `You are a tech news curator. Your ONLY job is to select the ${SELECT_TOP_N} most important articles from the list below. Another AI will handle translation and summarization — you just select.
 
-## Selection criteria (BE EXTREMELY STRICT)
+## What qualifies as important (BE EXTREMELY STRICT)
 
-Only select articles that are:
-- **AAA games** from major studios (Rockstar, CD Projekt, FromSoftware, Naughty Dog, Bethesda, Blizzard, etc.) — major releases, delays, or announcements only
-- **Major AI launches** — new models from OpenAI/Google/Anthropic, significant capability breakthroughs, major safety/policy changes
-- **Critical programming news** — major framework releases (React, Docker, Kubernetes, Rust), critical zero-day CVEs, industry shifts
+Select ONLY articles that are:
+- **AAA games** from major studios (Rockstar, CD Projekt, FromSoftware, Naughty Dog, Bethesda, Blizzard, etc.) — major releases, delays, or announcements. NOT indie games, NOT opinion pieces, NOT pride week articles, NOT interviews
+- **Major AI launches** — new models from OpenAI/Google/Anthropic, significant capability breakthroughs, major safety/policy changes. NOT tool updates, NOT tutorials, NOT benchmarks
+- **Critical programming news** — major framework releases (React, Docker, Kubernetes, Rust), critical zero-day CVEs, industry shifts. NOT minor library updates, NOT blog posts, NOT tips
 
-## Do NOT select:
-- Indie games, mobile games, browser games, game opinion pieces, pride week articles, developer interviews
-- Tool updates, API changes, tutorials, benchmarks, tool tips
-- Minor library updates, blog posts, personal stories, rumors
-- General news, celebrity gossip, non-tech content
-- Articles similar to already delivered ones
+When in doubt, do NOT select. It's better to select fewer than 10 than to include unimportant ones.
 
 ## Articles to choose from (${candidates.length} total):
 [
@@ -53,7 +48,7 @@ ${articleList}
 ]
 ${recentList}
 
-Select exactly ${SELECT_TOP_N} articles. Respond in this exact JSON format:
+Select up to ${SELECT_TOP_N} articles. Respond in this exact JSON format:
 {"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}]}`;
 
   const resp = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
