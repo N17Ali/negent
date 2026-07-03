@@ -34,7 +34,7 @@ export default {
       case '1-59/20 * * * *':
         ctx.waitUntil(processCron(env));
         break;
-      case '0 */3 * * *':
+      case '0,30 * * * *':
         ctx.waitUntil(deliverCron(env));
         break;
       default:

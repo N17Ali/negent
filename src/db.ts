@@ -186,13 +186,41 @@ export function getDeliveredChatIds(db: D1Database, articleId: number) {
     .all<{ chat_id: number }>();
 }
 
-export function upsertSubscriber(
+export function getSubscriberMessageCount(db: D1Database, chatId: number) {
+  return db
+    .prepare(
+      `SELECT COUNT(*) as c FROM delivery_log
+       WHERE chat_id = ? AND success = 1
+       AND sent_at > datetime('now', '-1 hour')`
+    )
+    .bind(chatId)
+    .first<{ c: number }>();
+}
+
+export function getOneRecentArticle(db: D1Database) {
+  return db
+    .prepare(
+      `SELECT a.*, s.name as source_name FROM articles a
+       JOIN sources s ON a.source_id = s.id
+       WHERE a.status = 'done' AND a.relevance_score >= 3
+       ORDER BY a.processed_at DESC LIMIT 1`
+    )
+    .first<Article & { source_name: string }>();
+}
+
+export async function upsertSubscriber(
   db: D1Database,
   chatId: number,
   username: string | null,
   firstName: string | null
-) {
-  return db
+): Promise<{ isNew: boolean }> {
+  const existing = await db
+    .prepare('SELECT id FROM subscribers WHERE chat_id = ?')
+    .bind(chatId)
+    .first();
+  const isNew = !existing;
+
+  await db
     .prepare(
       `INSERT INTO subscribers (chat_id, username, first_name, is_active, is_admin)
        VALUES (?, ?, ?, 1, CASE WHEN (SELECT COUNT(*) FROM subscribers) = 0 THEN 1 ELSE 0 END)
@@ -201,6 +229,8 @@ export function upsertSubscriber(
     )
     .bind(chatId, username, firstName)
     .run();
+
+  return { isNew };
 }
 
 export function unsubscribe(db: D1Database, chatId: number) {
@@ -228,21 +258,4 @@ export function isAdmin(db: D1Database, chatId: number) {
 
 export function getAllSources(db: D1Database) {
   return db.prepare('SELECT * FROM sources ORDER BY name').all<Source>();
-}
-
-export function addSource(db: D1Database, url: string, name: string, addedBy: number) {
-  return db
-    .prepare(
-      `INSERT INTO sources (url, name, added_by, fetch_order)
-       VALUES (?, ?, ?, (SELECT COALESCE(MAX(fetch_order), 0) + 1 FROM sources))`
-    )
-    .bind(url, name, addedBy)
-    .run();
-}
-
-export function removeSource(db: D1Database, sourceId: number) {
-  return db
-    .prepare('UPDATE sources SET active = 0 WHERE id = ?')
-    .bind(sourceId)
-    .run();
 }

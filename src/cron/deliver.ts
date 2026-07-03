@@ -4,13 +4,35 @@ import {
   getUndeliveredArticles,
   getActiveSubscribers,
   getDeliveredChatIds,
+  getSubscriberMessageCount,
   markDelivered,
   logDelivery,
   deactivateSubscriber,
 } from '../db';
-import { MAX_ARTICLES_PER_DELIVERY } from '../utils/constants';
+import {
+  MAX_ARTICLES_PER_DELIVERY,
+  MAX_MESSAGES_PER_HOUR,
+  DELIVERY_START_HOUR,
+  DELIVERY_END_HOUR,
+  TIMEZONE,
+} from '../utils/constants';
+
+function isWithinDeliveryHours(): boolean {
+  const hourStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIMEZONE,
+    hour: 'numeric',
+    hour12: false,
+  }).format(new Date());
+  const hour = parseInt(hourStr, 10);
+  return hour >= DELIVERY_START_HOUR && hour < DELIVERY_END_HOUR;
+}
 
 export async function deliverCron(env: Env): Promise<void> {
+  if (!isWithinDeliveryHours()) {
+    console.log('deliver: outside delivery hours (9am-9pm Tehran), skipping');
+    return;
+  }
+
   const { results: articles } = await getUndeliveredArticles(
     env.DB,
     MAX_ARTICLES_PER_DELIVERY
@@ -35,6 +57,11 @@ export async function deliverCron(env: Env): Promise<void> {
 
     for (const sub of subscribers) {
       if (alreadySent.has(sub.chat_id)) continue;
+
+      const countResult = await getSubscriberMessageCount(env.DB, sub.chat_id);
+      const sentThisHour = countResult?.c ?? 0;
+      if (sentThisHour >= MAX_MESSAGES_PER_HOUR) continue;
+
       try {
         const ok = await sendArticle(
           sub.chat_id,

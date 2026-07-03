@@ -10,6 +10,11 @@ export const MIN_RELEVANCE_SCORE = 3;
 
 export const MAX_ARTICLE_AGE_HOURS = 48;
 
+export const DELIVERY_START_HOUR = 9;
+export const DELIVERY_END_HOUR = 21;
+export const MAX_MESSAGES_PER_HOUR = 3;
+export const TIMEZONE = 'Asia/Tehran';
+
 export const RELEVANT_KEYWORDS: Record<string, string[]> = {
   ai: [
     'ai', 'artificial intelligence', 'llm', 'gpt', 'chatgpt', 'openai',
