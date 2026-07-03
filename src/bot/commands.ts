@@ -41,8 +41,7 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
     await sendMessage(
       chatId,
       '👋 سلام! به ربات اخبار تکنولوژی خوش اومدی.\n'
-      + 'من مهم‌ترین اخبار هوش مصنوعی، برنامه‌نویسی و بازی‌های کامپیوتری رو از منابع معتبر دنیا جمع‌آوری می‌کنم و خلاصه‌اشون رو به فارسی برات میفرستم.\n\n'
-      + '⏰ هر روز بین ساعت ۹ صبح تا ۹ شب، تا ۳ خبر در ساعت دریافت می‌کنی.\n\n'
+      + 'من مهم‌ترین اخبار هوش مصنوعی، برنامه‌نویسی و بازی‌های کامپیوتری رو از منابع معتبر دنیا جمع‌آوری می‌کنم و خلاصه‌اشون رو به فارسی هر روز بین ساعت ۹ صبح تا ۹ شب برات میفرستم.\n\n'
       + '📚 دستورها:\n'
       + '/sources — لیست منابع خبری\n'
       + '/stop — لغو اشتراک',
@@ -107,9 +106,10 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
     const stats = await env.DB.batch([
       env.DB.prepare('SELECT COUNT(*) as c FROM sources WHERE active = 1'),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'raw'"),
-      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'processing'"),
+      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'selected'"),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND delivered = 0"),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'failed'"),
+      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'skipped'"),
       env.DB.prepare('SELECT COUNT(*) as c FROM subscribers WHERE is_active = 1'),
       env.DB.prepare(
         "SELECT COALESCE(category, '?') as cat, COUNT(*) as c FROM articles WHERE status = 'done' GROUP BY category"
@@ -118,12 +118,13 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
         "SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND relevance_score >= 4"
       ),
     ]);
-    const [src, raw, processing, done, failed, subs, byCat, highScore] = stats;
+    const [src, raw, selected, done, failed, skipped, subs, byCat, highScore] = stats;
     const srcN = (src.results[0] as any).c;
     const rawN = (raw.results[0] as any).c;
-    const processingN = (processing.results[0] as any).c;
+    const selectedN = (selected.results[0] as any).c;
     const doneN = (done.results[0] as any).c;
     const failedN = (failed.results[0] as any).c;
+    const skippedN = (skipped.results[0] as any).c;
     const subsN = (subs.results[0] as any).c;
     const highScoreN = (highScore.results[0] as any).c;
     const catLines = (byCat.results as any[])
@@ -132,14 +133,15 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
     await sendMessage(
       chatId,
       '📊 <b>وضعیت سیستم:</b>\n\n'
-      + `📡 منابع فعال: <b>${srcN}</b>\n`
-      + `📝 مقالات raw: <b>${rawN}</b>\n`
-      + `⏳ در حال پردازش: <b>${processingN}</b>\n`
-      + `✅ آماده ارسال: <b>${doneN}</b>\n`
-      + `⭐ نمره بالا (4+): <b>${highScoreN}</b>\n`
-      + `❌ ناموفق: <b>${failedN}</b>\n`
-      + `👥 مشترکین فعال: <b>${subsN}</b>\n\n`
-      + `📋 دسته‌بندی پردازش‌شده:\n${catLines}`,
+        + `📡 منابع فعال: <b>${srcN}</b>\n`
+        + `📝 صف انتظار: <b>${rawN}</b>\n`
+        + `🎯 انتخاب‌شده: <b>${selectedN}</b>\n`
+        + `✅ آماده ارسال: <b>${doneN}</b>\n`
+        + `⭐ نمره بالا (4+): <b>${highScoreN}</b>\n`
+        + `⏭ رد شده: <b>${skippedN}</b>\n`
+        + `❌ ناموفق: <b>${failedN}</b>\n`
+        + `👥 مشترکین فعال: <b>${subsN}</b>\n\n`
+        + `📋 دسته‌بندی پردازش‌شده:\n${catLines}`,
       env.BOT_TOKEN
     );
     return;

@@ -1,7 +1,6 @@
 import { Env } from './types';
 import { fetchCron } from './cron/fetch';
-import { processCron } from './cron/process';
-import { deliverCron } from './cron/deliver';
+import { selectCron } from './cron/select';
 import { handleUpdate } from './bot/commands';
 
 export default {
@@ -31,11 +30,8 @@ export default {
       case '*/10 * * * *':
         ctx.waitUntil(fetchCron(env));
         break;
-      case '1-59/10 * * * *':
-        ctx.waitUntil(processCron(env));
-        break;
-      case '0,15,30,45 * * * *':
-        ctx.waitUntil(deliverCron(env));
+      case '0 */3 * * *':
+        ctx.waitUntil(selectCron(env));
         break;
       default:
         console.warn(`unknown cron expression: "${event.cron}"`);

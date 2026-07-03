@@ -91,11 +91,54 @@ export function getNextRawArticle(db: D1Database) {
       `SELECT a.*, s.name as source_name FROM articles a
        LEFT JOIN sources s ON a.source_id = s.id
        WHERE (a.status = 'raw' OR (a.status = 'failed' AND a.retry_count < 3))
-       AND a.fetched_at > datetime('now', '-48 hours')
+       AND a.fetched_at > datetime('now', '-24 hours')
        ORDER BY CASE a.status WHEN 'raw' THEN 0 ELSE 1 END, a.fetched_at ASC
        LIMIT 1`
     )
     .first<Article & { source_name: string | null }>();
+}
+
+export function getRawArticlesBatch(db: D1Database, limit: number) {
+  return db
+    .prepare(
+      `SELECT a.id, a.title, a.content_snippet, s.name as source_name FROM articles a
+       LEFT JOIN sources s ON a.source_id = s.id
+       WHERE a.status = 'raw'
+       AND a.fetched_at > datetime('now', '-24 hours')
+       ORDER BY a.fetched_at ASC
+       LIMIT ?`
+    )
+    .bind(limit)
+    .all<{ id: number; title: string; content_snippet: string | null; source_name: string | null }>();
+}
+
+export function markArticlesSkipped(db: D1Database, ids: number[]) {
+  if (!ids.length) return Promise.resolve();
+  const placeholders = ids.map(() => '?').join(',');
+  return db
+    .prepare(`UPDATE articles SET status = 'skipped' WHERE id IN (${placeholders})`)
+    .bind(...ids)
+    .run();
+}
+
+export function markArticlesSelected(db: D1Database, ids: number[]) {
+  if (!ids.length) return Promise.resolve();
+  const placeholders = ids.map(() => '?').join(',');
+  return db
+    .prepare(`UPDATE articles SET status = 'selected' WHERE id IN (${placeholders})`)
+    .bind(...ids)
+    .run();
+}
+
+export function getSelectedArticles(db: D1Database) {
+  return db
+    .prepare(
+      `SELECT a.*, s.name as source_name FROM articles a
+       JOIN sources s ON a.source_id = s.id
+       WHERE a.status = 'selected'
+       ORDER BY a.fetched_at ASC`
+    )
+    .all<Article & { source_name: string }>();
 }
 
 export function lockArticle(db: D1Database, articleId: number) {
@@ -286,7 +329,7 @@ export function cleanupOldArticles(db: D1Database) {
     .prepare(
       `DELETE FROM articles
        WHERE fetched_at < datetime('now', '-24 hours')
-       AND status IN ('done', 'failed', 'raw')`
+       AND status IN ('done', 'failed', 'raw', 'skipped')`
     )
     .run();
 }

@@ -2,6 +2,7 @@ export interface Env {
   DB: D1Database;
   BOT_TOKEN: string;
   GEMINI_API_KEY: string;
+  NVIDIA_API_KEY: string;
 }
 
 export interface Source {
@@ -26,7 +27,7 @@ export interface Article {
   media_type: 'photo' | 'video' | null;
   published_at: string | null;
   fetched_at: string;
-  status: 'raw' | 'processing' | 'done' | 'failed';
+  status: 'raw' | 'processing' | 'done' | 'failed' | 'skipped' | 'selected';
   summary_fa: string | null;
   category: string | null;
   relevance_score: number | null;
