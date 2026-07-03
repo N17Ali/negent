@@ -29,12 +29,12 @@ async function callWithRetry(
   apiKey: string,
   model: string
 ): Promise<GeminiResult> {
-  const prompt = `You are a Persian tech news translator and summarizer. An article has already been selected as important — your job is to summarize it in Persian.
+  const prompt = `You are a Persian tech news translator and summarizer.
 
 ## Task
 
 1. Categorize into exactly ONE: "ai", "programming", or "gaming"
-2. Rate importance 1-5 (this is for display only, the article is already selected)
+2. Rate importance 1-5 (for display only)
 3. Summarize in 3-4 short paragraphs
 
 ## Persian writing rules
@@ -103,7 +103,7 @@ async function callGemini(url: string, body: string): Promise<GeminiResult> {
     try {
       const errBody = (await resp.json()) as { error?: { message?: string } };
       detail = errBody.error?.message || '';
-    } catch {}
+    } catch { }
     const err: GeminiError = new Error(
       resp.status === 429
         ? `RATE_LIMITED: ${detail || 'quota exceeded'}`

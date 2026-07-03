@@ -31,7 +31,7 @@ export async function selectTopArticles(
     )
     .join(',\n');
 
-  const prompt = `You are a tech news curator. Your ONLY job is to select the ${SELECT_TOP_N} most important articles from the list below. Another AI will handle translation and summarization — you just select.
+  const prompt = `You are a tech news curator. Select the ${SELECT_TOP_N} most important articles from the list below.
 
 ## What qualifies as important (BE EXTREMELY STRICT)
 
