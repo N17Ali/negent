@@ -38,6 +38,43 @@ export function insertArticle(
     .run();
 }
 
+export interface ArticleInsert {
+  sourceId: number;
+  urlHash: string;
+  url: string;
+  title: string;
+  contentSnippet: string | null;
+  mediaUrl: string | null;
+  mediaType: string | null;
+  publishedAt: string | null;
+}
+
+export function batchInsertArticles(
+  db: D1Database,
+  articles: ArticleInsert[]
+): Promise<D1Result[]> {
+  if (!articles.length) return Promise.resolve([]);
+  const stmts = articles.map((a) =>
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO articles
+         (source_id, url_hash, url, title, content_snippet, media_url, media_type, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        a.sourceId,
+        a.urlHash,
+        a.url,
+        a.title,
+        a.contentSnippet,
+        a.mediaUrl,
+        a.mediaType,
+        a.publishedAt
+      )
+  );
+  return db.batch(stmts);
+}
+
 export function unstickProcessing(db: D1Database) {
   return db
     .prepare(
