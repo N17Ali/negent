@@ -10,6 +10,12 @@ const OK_RESPONSE = (text: string) =>
     }),
   }) as unknown as Response;
 
+const VALID_RESULT = JSON.stringify({
+  summary: 'خلاصه تست',
+  category: 'ai',
+  relevance_score: 4,
+});
+
 describe('summarizeAndTranslate', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -22,18 +28,16 @@ describe('summarizeAndTranslate', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns the summary field from Gemini JSON', async () => {
-    fetchMock.mockResolvedValueOnce(
-      OK_RESPONSE(JSON.stringify({ summary: 'خلاصه تست' }))
-    );
+  it('returns summary, category, and relevance_score from Gemini JSON', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     const out = await summarizeAndTranslate('T', 'C', 'Source', 'KEY');
-    expect(out).toBe('خلاصه تست');
+    expect(out.summary).toBe('خلاصه تست');
+    expect(out.category).toBe('ai');
+    expect(out.relevance_score).toBe(4);
   });
 
   it('sends prompt with title, content, and source in request body', async () => {
-    fetchMock.mockResolvedValueOnce(
-      OK_RESPONSE(JSON.stringify({ summary: 's' }))
-    );
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('MyTitle', 'MyContent', 'MySource', 'KEY');
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0];
@@ -46,9 +50,7 @@ describe('summarizeAndTranslate', () => {
   });
 
   it('includes API key in URL', async () => {
-    fetchMock.mockResolvedValueOnce(
-      OK_RESPONSE(JSON.stringify({ summary: 's' }))
-    );
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'SECRET_KEY');
     const [url] = fetchMock.mock.calls[0];
     expect(url).toContain('key=SECRET_KEY');
@@ -84,9 +86,29 @@ describe('summarizeAndTranslate', () => {
   });
 
   it('throws when summary field is missing', async () => {
-    fetchMock.mockResolvedValueOnce(OK_RESPONSE(JSON.stringify({ other: 'x' })));
+    fetchMock.mockResolvedValueOnce(
+      OK_RESPONSE(JSON.stringify({ category: 'ai', relevance_score: 3 }))
+    );
     await expect(summarizeAndTranslate('T', 'C', 'S', 'K')).rejects.toThrow(
       'No summary in Gemini response'
+    );
+  });
+
+  it('throws when category field is missing', async () => {
+    fetchMock.mockResolvedValueOnce(
+      OK_RESPONSE(JSON.stringify({ summary: 's', relevance_score: 3 }))
+    );
+    await expect(summarizeAndTranslate('T', 'C', 'S', 'K')).rejects.toThrow(
+      'No category in Gemini response'
+    );
+  });
+
+  it('throws when relevance_score field is missing', async () => {
+    fetchMock.mockResolvedValueOnce(
+      OK_RESPONSE(JSON.stringify({ summary: 's', category: 'ai' }))
+    );
+    await expect(summarizeAndTranslate('T', 'C', 'S', 'K')).rejects.toThrow(
+      'No relevance_score in Gemini response'
     );
   });
 

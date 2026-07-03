@@ -26,14 +26,22 @@ export async function processCron(env: Env): Promise<void> {
   }
 
   try {
-    const summary = await summarizeAndTranslate(
+    const result = await summarizeAndTranslate(
       article.title,
       article.content_snippet || '',
       article.source_name || '',
       env.GEMINI_API_KEY
     );
-    console.log(`process: article ${article.id} summary (${summary.length} chars) saved`);
-    await markArticleDone(env.DB, article.id, summary);
+    console.log(
+      `process: article ${article.id} [${result.category}|${result.relevance_score}] summary (${result.summary.length} chars) saved`
+    );
+    await markArticleDone(
+      env.DB,
+      article.id,
+      result.summary,
+      result.category,
+      result.relevance_score
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     console.error(`process: article ${article.id} failed: ${msg}`);

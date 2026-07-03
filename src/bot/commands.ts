@@ -135,17 +135,35 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND delivered = 0"),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'failed'"),
       env.DB.prepare('SELECT COUNT(*) as c FROM subscribers WHERE is_active = 1'),
+      env.DB.prepare(
+        "SELECT COALESCE(category, '?') as cat, COUNT(*) as c FROM articles WHERE status = 'done' GROUP BY category"
+      ),
+      env.DB.prepare(
+        "SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND relevance_score >= 4"
+      ),
     ]);
-    const [src, raw, processing, done, failed, subs] = stats.map((s) => (s.results[0] as any).c);
+    const [src, raw, processing, done, failed, subs, byCat, highScore] = stats;
+    const srcN = (src.results[0] as any).c;
+    const rawN = (raw.results[0] as any).c;
+    const processingN = (processing.results[0] as any).c;
+    const doneN = (done.results[0] as any).c;
+    const failedN = (failed.results[0] as any).c;
+    const subsN = (subs.results[0] as any).c;
+    const highScoreN = (highScore.results[0] as any).c;
+    const catLines = (byCat.results as any[])
+      .map((r) => `   ${r.cat}: ${r.c}`)
+      .join('\n');
     await sendMessage(
       chatId,
       '📊 <b>وضعیت سیستم:</b>\n\n'
-        + `📡 منابع فعال: <b>${src}</b>\n`
-        + `📝 مقالات raw: <b>${raw}</b>\n`
-        + `⏳ در حال پردازش: <b>${processing}</b>\n`
-        + `✅ آماده ارسال: <b>${done}</b>\n`
-        + `❌ ناموفق: <b>${failed}</b>\n`
-        + `👥 مشترکین فعال: <b>${subs}</b>`,
+        + `📡 منابع فعال: <b>${srcN}</b>\n`
+        + `📝 مقالات raw: <b>${rawN}</b>\n`
+        + `⏳ در حال پردازش: <b>${processingN}</b>\n`
+        + `✅ آماده ارسال: <b>${doneN}</b>\n`
+        + `⭐ نمره بالا (4+): <b>${highScoreN}</b>\n`
+        + `❌ ناموفق: <b>${failedN}</b>\n`
+        + `👥 مشترکین فعال: <b>${subsN}</b>\n\n`
+        + `📋 دسته‌بندی پردازش‌شده:\n${catLines}`,
       env.BOT_TOKEN
     );
     return;

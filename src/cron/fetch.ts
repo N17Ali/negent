@@ -1,6 +1,7 @@
 import { Env } from '../types';
 import { parseFeed, computeUrlHash } from '../services/rss';
 import { getNextSource, advanceSourceOrder, insertArticle } from '../db';
+import { isRelevantArticle } from '../utils/filter';
 
 export async function fetchCron(env: Env): Promise<void> {
   const source = await getNextSource(env.DB);
@@ -31,8 +32,13 @@ export async function fetchCron(env: Env): Promise<void> {
   console.log(`fetch: ${source.name} parsed ${items.length} items`);
 
   let inserted = 0;
+  let skipped = 0;
   for (const item of items) {
     if (!item.link) continue;
+    if (!isRelevantArticle(item.title, item.description || '')) {
+      skipped++;
+      continue;
+    }
     const urlHash = await computeUrlHash(item.link);
     const result = await insertArticle(
       env.DB,
@@ -48,6 +54,6 @@ export async function fetchCron(env: Env): Promise<void> {
     if (result.meta.changes) inserted++;
   }
 
-  console.log(`fetch: ${source.name} inserted ${inserted} new articles`);
+  console.log(`fetch: ${source.name} inserted ${inserted} new, skipped ${skipped} irrelevant`);
   await advanceSourceOrder(env.DB, source.id);
 }
