@@ -1,12 +1,11 @@
 import { Env, Source } from '../types';
-import { sendMessage } from '../services/telegram';
+import { sendMessage, sendArticle } from '../services/telegram';
 import {
   upsertSubscriber,
   unsubscribe,
   isAdmin,
   getAllSources,
-  addSource,
-  removeSource,
+  getOneRecentArticle,
 } from '../db';
 
 interface TelegramUpdate {
@@ -29,18 +28,44 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
   console.log(`command from ${chatId} (${username || firstName}): "${text}"`);
 
   if (text === '/start') {
+    let isNew = false;
     try {
-      await upsertSubscriber(env.DB, chatId, username, firstName);
-      console.log(`upsertSubscriber OK for ${chatId}`);
+      const result = await upsertSubscriber(env.DB, chatId, username, firstName);
+      isNew = result.isNew;
+      console.log(`upsertSubscriber OK for ${chatId} (isNew=${isNew})`);
     } catch (err) {
       console.error('upsertSubscriber failed:', err instanceof Error ? err.message : err);
       throw err;
     }
+
     await sendMessage(
       chatId,
-      '👋 سلام! عضو شدی.\nهر ۳ ساعت خلاصه اخبار تکنولوژی رو برات میفرستم.\n\nلغو اشتراک: /stop\nلیست منابع: /sources',
+      '👋 سلام! به ربات اخبار تکنولوژی خوش اومدی.\n'
+        + 'من مهم‌ترین اخبار هوش مصنوعی، برنامه‌نویسی و بازی‌های کامپیوتری رو از منابع معتبر دنیا جمع‌آوری می‌کنم و خلاصه‌اشون رو به فارسی برات میفرستم.\n\n'
+        + '⏰ هر روز بین ساعت ۹ صبح تا ۹ شب، تا ۳ خبر در ساعت دریافت می‌کنی.\n\n'
+        + '📚 دستورها:\n'
+        + '/sources — لیست منابع خبری\n'
+        + '/status — وضعیت سیستم (ادمین)\n'
+        + '/stop — لغو اشتراک',
       env.BOT_TOKEN
     );
+
+    if (isNew) {
+      const article = await getOneRecentArticle(env.DB);
+      if (article) {
+        console.log(`start: sending welcome article ${article.id} to new subscriber ${chatId}`);
+        try {
+          await sendArticle(
+            chatId,
+            article,
+            article.source_name || '',
+            env.BOT_TOKEN
+          );
+        } catch (err) {
+          console.error('start: failed to send welcome article:', err instanceof Error ? err.message : err);
+        }
+      }
+    }
     return;
   }
 
@@ -68,55 +93,7 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
       .join('\n');
     await sendMessage(
       chatId,
-      `📡 <b>منابع خبری:</b>\n\n${list}\n\nاضافه کردن: /add URL نام\nحذف: /remove شماره`,
-      env.BOT_TOKEN
-    );
-    return;
-  }
-
-  if (text.startsWith('/add ')) {
-    const admin = await isAdmin(env.DB, chatId);
-    if (!admin?.is_admin) {
-      await sendMessage(chatId, '⛔ فقط ادمین میتونه منبع اضافه کنه.', env.BOT_TOKEN);
-      return;
-    }
-    const parts = text.slice(5).trim().split(/\s+/);
-    const url = parts[0];
-    let hostname: string;
-    try {
-      hostname = new URL(url).hostname;
-    } catch {
-      await sendMessage(chatId, '❌ فرمت: /add https://example.com/feed نام', env.BOT_TOKEN);
-      return;
-    }
-    const name = parts.slice(1).join(' ') || hostname;
-    try {
-      await addSource(env.DB, url, name, chatId);
-      await sendMessage(chatId, `✅ منبع اضافه شد: <b>${escapeHtml(name)}</b>`, env.BOT_TOKEN);
-    } catch {
-      await sendMessage(chatId, '❌ این منبع قبلاً اضافه شده.', env.BOT_TOKEN);
-    }
-    return;
-  }
-
-  if (text.startsWith('/remove ')) {
-    const admin = await isAdmin(env.DB, chatId);
-    if (!admin?.is_admin) {
-      await sendMessage(chatId, '⛔ فقط ادمین میتونه منبع حذف کنه.', env.BOT_TOKEN);
-      return;
-    }
-    const idStr = text.slice(8).trim();
-    const { results: sources } = await getAllSources(env.DB);
-    const idx = parseInt(idStr, 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= sources.length) {
-      await sendMessage(chatId, '❌ شماره نامعتبر. /sources رو بزن.', env.BOT_TOKEN);
-      return;
-    }
-    const source = sources[idx];
-    await removeSource(env.DB, source.id);
-    await sendMessage(
-      chatId,
-      `🗑 منبع غیرفعال شد: <b>${escapeHtml(source.name)}</b>`,
+      `📡 <b>منابع خبری:</b>\n\n${list}`,
       env.BOT_TOKEN
     );
     return;
