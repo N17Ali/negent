@@ -37,16 +37,15 @@ Entry `src/index.ts` exports `default { fetch, scheduled }`:
 
 The `switch` in `src/index.ts` matches these literal cron strings from `wrangler.toml`:
 - `*/10 * * * *` → `cron/fetch.ts` (fetch one RSS source, save raw articles, rotate via `fetch_order`)
-- `1-59/10 * * * *` → `cron/process.ts` (Gemini summarize+translate one article)
-- `0,15,30,45 * * * *` → `cron/deliver.ts` (send done articles to subscribers, mark delivered)
+- `0 */3 * * *` → `cron/select.ts` (DeepSeek selects top 10 → Gemini summarizes → deliver to subscribers)
 
 If you change a cron expression in `wrangler.toml`, update the matching `case` in `index.ts` or that handler silently stops firing.
 
 ### Data flow
 
-`sources` → fetch cron pulls one source/run → `articles` (status `raw`) → process cron locks one article → Gemini → status `done`, `summary_fa` saved → deliver cron sends to all active `subscribers` every 15 min (9am-9pm Tehran time only, max 3 msgs/hour/subscriber), marks `delivered=1`.
+`sources` → fetch cron pulls one source/run → `articles` (status `raw`) → select cron (every 3h, 9am-9pm Tehran) sends up to 200 raw titles to DeepSeek → DeepSeek picks top 10 → marks rest `skipped` → Gemini summarizes the 10 → delivers to all active `subscribers` (max 10/hour), marks `delivered=1`.
 
-- Article states: `raw → processing → done` (or `failed`); retries capped at 3 (`retry_count < 3`). Articles stuck in `processing` >10 min reset to `failed` by `unstickProcessing` (`src/db.ts`).
+- Article states: `raw → selected → done` (or `failed`); non-selected articles marked `skipped`. Articles stuck in `processing` >10 min reset to `failed` by `unstickProcessing` (`src/db.ts`).
 - First subscriber to `/start` becomes admin (`is_admin=1`), enforced in the `upsertSubscriber` SQL — not in app code.
 - First-time `/start` sends a greeting + one recent article as a sample.
 - Delivery respects quiet hours (9pm-9am Tehran) and rate limits (3 msgs/hour/subscriber).
