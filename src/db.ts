@@ -156,6 +156,16 @@ export function markDelivered(db: D1Database, articleId: number) {
     .run();
 }
 
+export function markMultipleDelivered(db: D1Database, articleIds: number[]) {
+  if (!articleIds.length) return Promise.resolve();
+  const stmts = articleIds.map((id) =>
+    db
+      .prepare(`UPDATE articles SET delivered = 1, delivered_at = datetime('now') WHERE id = ?`)
+      .bind(id)
+  );
+  return db.batch(stmts);
+}
+
 export function logDelivery(
   db: D1Database,
   articleId: number,
@@ -264,8 +274,8 @@ export function cleanupOldArticles(db: D1Database) {
   return db
     .prepare(
       `DELETE FROM articles
-       WHERE fetched_at < datetime('now', '-48 hours')
-       AND (status IN ('done', 'failed') OR delivered = 1)`
+       WHERE fetched_at < datetime('now', '-24 hours')
+       AND status IN ('done', 'failed', 'raw')`
     )
     .run();
 }

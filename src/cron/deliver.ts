@@ -1,16 +1,16 @@
-import { Env } from '../types';
-import { sendArticle } from '../services/telegram';
+import { Env, Article } from '../types';
+import { sendArticleBatch } from '../services/telegram';
 import {
   getUndeliveredArticles,
   getActiveSubscribers,
-  getDeliveredChatIds,
   getSubscriberMessageCount,
-  markDelivered,
+  markMultipleDelivered,
   logDelivery,
   deactivateSubscriber,
 } from '../db';
 import {
   MAX_ARTICLES_PER_DELIVERY,
+  ARTICLES_PER_MESSAGE,
   MAX_MESSAGES_PER_HOUR,
   DELIVERY_START_HOUR,
   DELIVERY_END_HOUR,
@@ -48,49 +48,61 @@ export async function deliverCron(env: Env): Promise<void> {
     return;
   }
 
-  console.log(`deliver: ${articles.length} articles × ${subscribers.length} subscribers`);
+  const batches: (Article & { source_name: string })[][] = [];
+  for (let i = 0; i < articles.length; i += ARTICLES_PER_MESSAGE) {
+    batches.push(articles.slice(i, i + ARTICLES_PER_MESSAGE));
+  }
 
-  for (const article of articles) {
-    let allSent = true;
-    const { results: delivered } = await getDeliveredChatIds(env.DB, article.id);
-    const alreadySent = new Set(delivered.map((d) => d.chat_id));
+  console.log(
+    `deliver: ${articles.length} articles in ${batches.length} batches × ${subscribers.length} subscribers`
+  );
 
-    for (const sub of subscribers) {
-      if (alreadySent.has(sub.chat_id)) continue;
+  for (const sub of subscribers) {
+    const countResult = await getSubscriberMessageCount(env.DB, sub.chat_id);
+    const sentThisHour = countResult?.c ?? 0;
+    let remaining = MAX_MESSAGES_PER_HOUR - sentThisHour;
 
-      const countResult = await getSubscriberMessageCount(env.DB, sub.chat_id);
-      const sentThisHour = countResult?.c ?? 0;
-      if (sentThisHour >= MAX_MESSAGES_PER_HOUR) continue;
+    if (remaining <= 0) {
+      console.log(`deliver: subscriber ${sub.chat_id} rate-limited (${sentThisHour}/${MAX_MESSAGES_PER_HOUR} this hour)`);
+      continue;
+    }
 
+    for (const batch of batches) {
+      if (remaining <= 0) break;
+
+      const articleIds = batch.map((a) => a.id);
       try {
-        const ok = await sendArticle(
-          sub.chat_id,
-          article,
-          article.source_name || '',
-          env.BOT_TOKEN
-        );
-        await logDelivery(env.DB, article.id, sub.chat_id, ok);
-        if (!ok) allSent = false;
+        const ok = await sendArticleBatch(sub.chat_id, batch, env.BOT_TOKEN);
+        for (const id of articleIds) {
+          await logDelivery(env.DB, id, sub.chat_id, ok);
+        }
+        if (ok) {
+          remaining--;
+          console.log(`deliver: batch [${articleIds.join(',')}] → ${sub.chat_id} OK`);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown';
         if (msg === 'BLOCKED') {
           console.warn(`deliver: subscriber ${sub.chat_id} blocked the bot`);
           await deactivateSubscriber(env.DB, sub.chat_id);
-          await logDelivery(env.DB, article.id, sub.chat_id, false, 'blocked');
+          for (const id of articleIds) {
+            await logDelivery(env.DB, id, sub.chat_id, false, 'blocked');
+          }
+          break;
         } else if (msg === 'RATE_LIMITED') {
-          console.warn('deliver: rate limited, stopping batch');
-          return;
+          console.warn('deliver: Telegram rate limited, stopping');
+          break;
         } else {
-          console.error(`deliver: article ${article.id} → ${sub.chat_id}: ${msg}`);
-          await logDelivery(env.DB, article.id, sub.chat_id, false, msg);
-          allSent = false;
+          console.error(`deliver: batch [${articleIds.join(',')}] → ${sub.chat_id}: ${msg}`);
+          for (const id of articleIds) {
+            await logDelivery(env.DB, id, sub.chat_id, false, msg);
+          }
         }
       }
     }
-
-    if (allSent) {
-      await markDelivered(env.DB, article.id);
-      console.log(`deliver: article ${article.id} sent to all`);
-    }
   }
+
+  const allArticleIds = articles.map((a) => a.id);
+  await markMultipleDelivered(env.DB, allArticleIds);
+  console.log(`deliver: marked ${allArticleIds.length} articles as delivered`);
 }

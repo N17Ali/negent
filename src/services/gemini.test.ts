@@ -89,14 +89,21 @@ describe('summarizeAndTranslate', () => {
     expect(out.summary).toBe('خلاصه تست');
   });
 
-  it('throws RATE_LIMITED after max retries on 429', async () => {
-    fetchMock.mockResolvedValue(ERR_RESPONSE(429, 'quota exceeded'));
+  it('throws RATE_LIMITED after max retries on 429 (primary), then falls back to Gemma', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     const promise = summarizeAndTranslate('T', 'C', 'S', 'K');
     promise.catch(() => {});
     await vi.advanceTimersByTimeAsync(2000);
     await vi.advanceTimersByTimeAsync(5000);
-    await expect(promise).rejects.toThrow('RATE_LIMITED: quota exceeded');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const out = await promise;
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(out.summary).toBe('خلاصه تست');
+    const fallbackUrl = fetchMock.mock.calls[3][0];
+    expect(fallbackUrl).toContain('gemma-4-31b-it');
   });
 
   it('throws on non-retryable error immediately (500)', async () => {

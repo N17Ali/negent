@@ -1,5 +1,5 @@
 import { Article, Source } from '../types';
-import { MAX_CAPTION_LENGTH, MAX_MESSAGE_LENGTH } from '../utils/constants';
+import { MAX_CAPTION_LENGTH, MAX_MESSAGE_LENGTH, ARTICLES_PER_MESSAGE } from '../utils/constants';
 
 export async function sendArticle(
   chatId: number,
@@ -21,6 +21,37 @@ export async function sendArticle(
   }
 
   return sendMessage(chatId, message, botToken);
+}
+
+export async function sendArticleBatch(
+  chatId: number,
+  articles: (Article & { source_name: string })[],
+  botToken: string
+): Promise<boolean> {
+  const message = formatBatchMessage(articles);
+  return sendMessage(chatId, message, botToken);
+}
+
+function formatBatchMessage(articles: (Article & { source_name: string })[]): string {
+  const separator = '\n\n━━━━━━━━━━\n\n';
+  const blocks = articles.map((a) => formatSingleInBatch(a));
+  return blocks.join(separator);
+}
+
+function formatSingleInBatch(article: Article & { source_name: string }): string {
+  const title = `<b>${escapeHtml(article.title)}</b>`;
+  const footer = `\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(article.source_name)}`;
+  const mediaLine = article.media_url ? ` | 🖼 <a href="${article.media_url}">تصویر</a>` : '';
+  const catIcon = categoryIcon(article.category);
+  const header = `${catIcon} `;
+  const footerLen = footer.length + mediaLine.length + header.length + 4;
+  const available = Math.floor((MAX_MESSAGE_LENGTH - footerLen) / articles_count_safe());
+  const summary = truncate(article.summary_fa || '', available);
+  return `${header}${title}\n\n${summary}\n${footer}${mediaLine}`;
+}
+
+function articles_count_safe(): number {
+  return ARTICLES_PER_MESSAGE;
 }
 
 function formatCaption(article: Article, sourceName: string): string {
@@ -123,4 +154,13 @@ function escapeHtml(text: string): string {
 function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 3) + '...';
+}
+
+function categoryIcon(category: string | null): string {
+  switch (category) {
+    case 'ai': return '🤖';
+    case 'programming': return '💻';
+    case 'gaming': return '🎮';
+    default: return '📰';
+  }
 }

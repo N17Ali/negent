@@ -1,5 +1,5 @@
 import { GeminiResult } from '../types';
-import { GEMINI_MODEL } from '../utils/constants';
+import { GEMINI_MODEL, GEMMA_MODEL } from '../utils/constants';
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [2000, 5000];
@@ -10,6 +10,24 @@ export async function summarizeAndTranslate(
   content: string,
   sourceName: string,
   apiKey: string
+): Promise<GeminiResult> {
+  try {
+    return await callWithRetry(title, content, sourceName, apiKey, GEMINI_MODEL);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('RATE_LIMITED')) {
+      console.warn(`gemini: primary model ${GEMINI_MODEL} rate-limited, falling back to ${GEMMA_MODEL}`);
+      return await callWithRetry(title, content, sourceName, apiKey, GEMMA_MODEL);
+    }
+    throw err;
+  }
+}
+
+async function callWithRetry(
+  title: string,
+  content: string,
+  sourceName: string,
+  apiKey: string,
+  model: string
 ): Promise<GeminiResult> {
   const prompt = `You are a tech news curator and summarizer. Given an article title and content, classify it and produce a Persian (Farsi) summary.
 
@@ -34,7 +52,7 @@ Source: ${sourceName}
 Respond in this exact JSON format:
 {"summary": "paragraph 1\\n\\nparagraph 2\\n\\nparagraph 3", "category": "ai", "relevance_score": 4}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const requestBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
@@ -57,7 +75,7 @@ Respond in this exact JSON format:
       if (attempt < MAX_ATTEMPTS && retryable) {
         const delay = RETRY_DELAYS_MS[attempt - 1];
         console.warn(
-          `gemini: attempt ${attempt}/${MAX_ATTEMPTS} failed (${lastError.message}), retrying in ${delay}ms...`
+          `${model}: attempt ${attempt}/${MAX_ATTEMPTS} failed (${lastError.message}), retrying in ${delay}ms...`
         );
         await sleep(delay);
         continue;
