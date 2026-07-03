@@ -12,7 +12,7 @@
     "seed:local": "wrangler d1 execute negent-db --local --file=seed.sql",
     "seed:remote": "wrangler d1 execute negent-db --remote --file=seed.sql",
     "cleanup:remote": "wrangler d1 execute negent-db --remote --command \"DELETE FROM articles WHERE fetched_at < datetime('now', '-48 hours') AND (status IN ('done', 'failed') OR delivered = 1)\"",
-    "purge:remote": "wrangler d1 execute negent-db --remote --command \"DELETE FROM articles; DELETE FROM delivery_log;\"",
+    "purge:remote": "wrangler d1 execute negent-db --remote --command \"DELETE FROM delivery_log; DELETE FROM articles;\"",
     "tail": "wrangler tail",
     "test": "vitest run",
     "test:watch": "vitest"
