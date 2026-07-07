@@ -1,4 +1,5 @@
 export const MAX_CONTENT_LENGTH = 2000;
+export const MAX_ARTICLE_TEXT_LENGTH = 8000;
 export const MAX_CAPTION_LENGTH = 1020;
 export const MAX_MESSAGE_LENGTH = 4090;
 export const MAX_RETRY_COUNT = 3;

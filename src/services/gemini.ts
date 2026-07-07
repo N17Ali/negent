@@ -35,7 +35,7 @@ async function callWithRetry(
 
 1. Categorize into exactly ONE: "ai", "programming", or "gaming"
 2. Rate importance 1-5 (for display only)
-3. Summarize in 3-4 short paragraphs
+3. Summarize in 3-6 paragraphs
 
 ## Persian writing rules
 
@@ -45,19 +45,27 @@ async function callWithRetry(
 - If quoting someone, prefix the quote line with "> " (markdown quote style)
 - If the content is too short or unclear, summarize what's available
 
+## Keep the specifics (important)
+
+Preserve every concrete fact the article states — never flatten a specific into a vague phrase:
+- Numbers and figures: sales/records, prices, benchmarks, dates, version numbers, percentages, player/download counts
+- Named entities: products, companies, people, studios, model names
+- Example: if the article says a game "broke its sales record with X million copies sold", you MUST include the "X million" — do NOT write just "hit a record" without the number
+- Never invent a figure that isn't in the source, but never drop one that is
+
 Article title: ${title}
 Article content: ${content}
 Source: ${sourceName}
 
-Respond in this exact JSON format:
-{"summary": "paragraph 1\\n\\nparagraph 2\\n\\nparagraph 3\\n\\nparagraph 4", "category": "ai", "relevance_score": 4}`;
+Respond in this exact JSON format (3 to 6 paragraphs, separated by \\n\\n):
+{"summary": "paragraph 1\\n\\nparagraph 2\\n\\n...up to paragraph 6", "category": "ai", "relevance_score": 4}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const requestBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 2048,
       responseMimeType: 'application/json',
     },
   });

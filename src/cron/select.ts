@@ -1,6 +1,7 @@
 import { Env, Article } from '../types';
 import { selectTopArticles } from '../services/selector';
 import { summarizeAndTranslate } from '../services/gemini';
+import { fetchArticleText } from '../services/extract';
 import { sendArticle } from '../services/telegram';
 import {
   getRawArticlesBatch,
@@ -113,10 +114,21 @@ async function selectAndSummarize(
 
     console.log(`select: summarizing article ${article.id} "${article.title}"`);
 
+    // Fetch the full article body for the summarizer; the RSS teaser is often too
+    // short to contain the key facts (numbers, records). Fall back to the teaser
+    // if the page fetch yields nothing useful or is shorter than what we have.
+    const teaser = article.content_snippet || '';
+    const fullText = await fetchArticleText(article.url);
+    const contentForSummary = fullText && fullText.length > teaser.length ? fullText : teaser;
+    console.log(
+      `select: article ${article.id} content ${contentForSummary.length} chars ` +
+        `(${contentForSummary === teaser ? 'teaser' : 'full page'})`
+    );
+
     try {
       const result = await summarizeAndTranslate(
         article.title,
-        article.content_snippet || '',
+        contentForSummary,
         article.source_name || '',
         env.GEMINI_API_KEY
       );

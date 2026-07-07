@@ -71,7 +71,7 @@ function firstTag(xml: string, tagName: string): string | null {
   return results.length > 0 ? results[0] : null;
 }
 
-function decodeEntities(text: string): string {
+export function decodeEntities(text: string): string {
   return text
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/&amp;/g, '&')
@@ -101,6 +101,12 @@ export function normalizeUrl(rawUrl: string): string {
   } catch {
     return rawUrl.toLowerCase().trim();
   }
+}
+
+export function parsePubDate(raw: string | null): number | null {
+  if (!raw) return null;
+  const ms = Date.parse(raw.trim());
+  return Number.isNaN(ms) ? null : ms;
 }
 
 export async function computeUrlHash(url: string): Promise<string> {

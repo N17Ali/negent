@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFeed, extractTags, normalizeUrl, computeUrlHash } from './rss';
+import { parseFeed, extractTags, normalizeUrl, computeUrlHash, parsePubDate } from './rss';
 
 const RSS_FEED = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -175,5 +175,25 @@ describe('computeUrlHash', () => {
     const a = await computeUrlHash('https://example.com/a');
     const b = await computeUrlHash('https://example.com/b');
     expect(a).not.toBe(b);
+  });
+});
+
+describe('parsePubDate', () => {
+  it('parses RFC-822 (RSS pubDate)', () => {
+    expect(parsePubDate('Tue, 07 Jul 2026 10:30:00 GMT')).toBe(
+      Date.parse('Tue, 07 Jul 2026 10:30:00 GMT')
+    );
+  });
+
+  it('parses ISO-8601 (Atom published)', () => {
+    expect(parsePubDate('2026-07-07T10:30:00Z')).toBe(Date.parse('2026-07-07T10:30:00Z'));
+  });
+
+  it('returns null for null input', () => {
+    expect(parsePubDate(null)).toBeNull();
+  });
+
+  it('returns null for unparseable dates', () => {
+    expect(parsePubDate('not a date')).toBeNull();
   });
 });

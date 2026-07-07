@@ -65,6 +65,28 @@ describe('summarizeAndTranslate', () => {
     expect(url).toContain('key=SECRET_KEY');
   });
 
+  it('asks for 3-6 paragraphs and no longer says "short"', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    await summarizeAndTranslate('T', 'C', 'S', 'K');
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
+    expect(prompt).toContain('3-6 paragraphs');
+    expect(prompt).not.toContain('short paragraphs');
+  });
+
+  it('instructs the model to preserve concrete facts', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    await summarizeAndTranslate('T', 'C', 'S', 'K');
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
+    expect(prompt).toContain('Preserve every concrete fact');
+  });
+
+  it('allows enough output tokens for six paragraphs', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    await summarizeAndTranslate('T', 'C', 'S', 'K');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.generationConfig.maxOutputTokens).toBe(2048);
+  });
+
   it('retries on 503 and succeeds on second attempt', async () => {
     fetchMock
       .mockResolvedValueOnce(ERR_RESPONSE(503, 'high demand'))
