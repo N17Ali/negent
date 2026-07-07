@@ -10,7 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 # since delivery ends at 21:00.)
 crons = [
   "*/10 * * * *",
-  "30 5,8,11,14 * * *"
+  "30 5,8,11,14,16 * * *"
 ]
 
 [[d1_databases]]
