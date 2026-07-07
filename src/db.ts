@@ -112,22 +112,33 @@ export function getRawArticlesBatch(db: D1Database, limit: number) {
     .all<{ id: number; title: string; content_snippet: string | null; source_name: string | null }>();
 }
 
+// D1 caps bound parameters at 100 per statement, so batch large id lists.
+const D1_MAX_VARS = 100;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function updateStatusByIds(db: D1Database, ids: number[], status: string) {
+  if (!ids.length) return Promise.resolve([]);
+  const statements = chunk(ids, D1_MAX_VARS).map((group) =>
+    db
+      .prepare(
+        `UPDATE articles SET status = '${status}' WHERE id IN (${group.map(() => '?').join(',')})`
+      )
+      .bind(...group)
+  );
+  return db.batch(statements);
+}
+
 export function markArticlesSkipped(db: D1Database, ids: number[]) {
-  if (!ids.length) return Promise.resolve();
-  const placeholders = ids.map(() => '?').join(',');
-  return db
-    .prepare(`UPDATE articles SET status = 'skipped' WHERE id IN (${placeholders})`)
-    .bind(...ids)
-    .run();
+  return updateStatusByIds(db, ids, 'skipped');
 }
 
 export function markArticlesSelected(db: D1Database, ids: number[]) {
-  if (!ids.length) return Promise.resolve();
-  const placeholders = ids.map(() => '?').join(',');
-  return db
-    .prepare(`UPDATE articles SET status = 'selected' WHERE id IN (${placeholders})`)
-    .bind(...ids)
-    .run();
+  return updateStatusByIds(db, ids, 'selected');
 }
 
 export function getSelectedArticles(db: D1Database) {
