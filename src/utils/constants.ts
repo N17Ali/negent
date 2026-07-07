@@ -7,7 +7,7 @@ export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 export const GEMMA_MODEL = 'gemma-4-31b-it';
 export const PROCESS_BATCH_SIZE = 5;
 
-export const BATCH_SELECT_SIZE = 200;
+export const BATCH_SELECT_SIZE = 300;
 export const SELECT_TOP_N = 10;
 
 export const MIN_RELEVANCE_SCORE = 4;

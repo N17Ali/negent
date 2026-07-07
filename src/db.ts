@@ -105,7 +105,7 @@ export function getRawArticlesBatch(db: D1Database, limit: number) {
        LEFT JOIN sources s ON a.source_id = s.id
        WHERE a.status = 'raw'
        AND a.fetched_at > datetime('now', '-24 hours')
-       ORDER BY a.fetched_at ASC
+       ORDER BY a.fetched_at DESC
        LIMIT ?`
     )
     .bind(limit)

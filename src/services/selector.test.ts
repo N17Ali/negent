@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { selectTopArticles } from './deepseek';
+import { selectTopArticles } from './selector';
+import { GEMINI_MODEL, GEMMA_MODEL } from '../utils/constants';
 
-const OK_RESPONSE = (content: string) =>
+const OK_RESPONSE = (text: string) =>
   ({
     ok: true,
     status: 200,
     json: async () => ({
-      choices: [{ message: { content } }],
+      candidates: [{ content: { parts: [{ text }] } }],
     }),
   }) as unknown as Response;
 
@@ -47,7 +48,7 @@ describe('selectTopArticles', () => {
       { id: 2, title: 'Pride week in games', snippet: 'opinion piece', source: 'Eurogamer' },
       { id: 3, title: 'GPT-5 launched', snippet: 'OpenAI announcement', source: 'TechCrunch' },
     ];
-    const result = await selectTopArticles(candidates, [], 'NVIDIA_KEY');
+    const result = await selectTopArticles(candidates, [], 'KEY');
     expect(result).toHaveLength(2);
     expect(result[0].id).toBe(1);
     expect(result[0].reason).toBe('major game release');
@@ -65,27 +66,17 @@ describe('selectTopArticles', () => {
     expect(result[0].id).toBe(1);
   });
 
-  it('sends prompt with article list to NVIDIA API', async () => {
+  it('sends prompt with article list to the primary Gemini model', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
     const candidates = [{ id: 1, title: 'GTA 6', snippet: 'delayed', source: 'IGN' }];
     await selectTopArticles(candidates, [], 'KEY');
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://integrate.api.nvidia.com/v1/chat/completions');
+    expect(url).toContain(`/models/${GEMINI_MODEL}:generateContent`);
+    expect(url).toContain('key=KEY');
     const body = JSON.parse(init.body);
-    expect(body.model).toBe('deepseek-ai/deepseek-v4-pro');
-    expect(body.messages[0].content).toContain('GTA 6');
-    expect(body.chat_template_kwargs).toEqual({ thinking: false });
-    expect(body.stream).toBe(false);
-    expect(body.temperature).toBe(1);
-    expect(body.top_p).toBe(0.95);
-  });
-
-  it('includes API key as Bearer token', async () => {
-    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
-    const candidates = [{ id: 1, title: 'Test', snippet: '', source: 'S' }];
-    await selectTopArticles(candidates, [], 'SECRET_NVIDIA_KEY');
-    const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers.Authorization).toBe('Bearer SECRET_NVIDIA_KEY');
+    expect(body.contents[0].parts[0].text).toContain('GTA 6');
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.generationConfig.temperature).toBe(1);
   });
 
   it('includes recent delivered titles in prompt for dedup', async () => {
@@ -94,8 +85,32 @@ describe('selectTopArticles', () => {
     await selectTopArticles(candidates, ['GTA 6 trailer revealed'], 'KEY');
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body);
-    expect(body.messages[0].content).toContain('Already delivered');
-    expect(body.messages[0].content).toContain('GTA 6 trailer revealed');
+    expect(body.contents[0].parts[0].text).toContain('Already delivered');
+    expect(body.contents[0].parts[0].text).toContain('GTA 6 trailer revealed');
+  });
+
+  it('falls back to gemma model when primary is rate-limited', async () => {
+    fetchMock
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(ERR_RESPONSE(429, 'quota exceeded'))
+      .mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
+    const promise = selectTopArticles(
+      [
+        { id: 1, title: 'T1', snippet: '', source: 'S' },
+        { id: 3, title: 'T3', snippet: '', source: 'S' },
+      ],
+      [],
+      'KEY'
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(8000);
+    const result = await promise;
+    // 3 attempts on primary (all 429) then fallback succeeds on first gemma try
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[0][0]).toContain(GEMINI_MODEL);
+    expect(fetchMock.mock.calls[3][0]).toContain(GEMMA_MODEL);
+    expect(result).toHaveLength(2);
   });
 
   it('filters out selected ids not in candidates', async () => {
@@ -118,25 +133,6 @@ describe('selectTopArticles', () => {
     expect(result[0].id).toBe(1);
   });
 
-  it('retries on 524 and succeeds on second attempt', async () => {
-    fetchMock
-      .mockResolvedValueOnce(ERR_RESPONSE(524, 'timeout'))
-      .mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
-    const promise = selectTopArticles(
-      [
-        { id: 1, title: 'T1', snippet: '', source: 'S' },
-        { id: 2, title: 'T2', snippet: '', source: 'S' },
-        { id: 3, title: 'T3', snippet: '', source: 'S' },
-      ],
-      [],
-      'KEY'
-    );
-    await vi.advanceTimersByTimeAsync(3000);
-    const result = await promise;
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(2);
-  });
-
   it('retries on 503 and succeeds on second attempt', async () => {
     fetchMock
       .mockResolvedValueOnce(ERR_RESPONSE(503, 'service unavailable'))
@@ -147,29 +143,15 @@ describe('selectTopArticles', () => {
       'KEY'
     );
     await vi.advanceTimersByTimeAsync(3000);
-    const result = await promise;
+    await promise;
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('throws after max retries on 524', async () => {
-    fetchMock.mockResolvedValue(ERR_RESPONSE(524, 'timeout'));
-    const promise = selectTopArticles(
-      [{ id: 1, title: 'T', snippet: '', source: 'S' }],
-      [],
-      'KEY'
-    );
-    promise.catch(() => {});
-    await vi.advanceTimersByTimeAsync(3000);
-    await vi.advanceTimersByTimeAsync(8000);
-    await expect(promise).rejects.toThrow('DeepSeek API error 524: timeout');
-    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('throws on non-retryable error immediately (500)', async () => {
     fetchMock.mockResolvedValueOnce(ERR_RESPONSE(500, 'server error'));
     await expect(
       selectTopArticles([{ id: 1, title: 'T', snippet: '', source: 'S' }], [], 'KEY')
-    ).rejects.toThrow('DeepSeek API error 500: server error');
+    ).rejects.toThrow('Selector API error 500: server error');
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -177,14 +159,14 @@ describe('selectTopArticles', () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(''));
     await expect(
       selectTopArticles([{ id: 1, title: 'T', snippet: '', source: 'S' }], [], 'KEY')
-    ).rejects.toThrow('Empty DeepSeek response');
+    ).rejects.toThrow('Empty selector response');
   });
 
   it('throws when selected array is missing', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(JSON.stringify({ wrong_key: [] })));
     await expect(
       selectTopArticles([{ id: 1, title: 'T', snippet: '', source: 'S' }], [], 'KEY')
-    ).rejects.toThrow('No selected array in DeepSeek response');
+    ).rejects.toThrow('No selected array in selector response');
   });
 
   it('limits to SELECT_TOP_N even if more returned', async () => {

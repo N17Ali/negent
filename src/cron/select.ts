@@ -1,5 +1,5 @@
 import { Env, Article } from '../types';
-import { selectTopArticles } from '../services/deepseek';
+import { selectTopArticles } from '../services/selector';
 import { summarizeAndTranslate } from '../services/gemini';
 import { sendArticle } from '../services/telegram';
 import {
@@ -63,14 +63,14 @@ export async function selectCron(env: Env): Promise<void> {
       source: r.source_name || '',
     }));
 
-    const selected = await selectTopArticles(candidates, recentTitles, env.NVIDIA_API_KEY);
+    const selected = await selectTopArticles(candidates, recentTitles, env.GEMINI_API_KEY);
     selectedIds = selected.map((s) => s.id);
 
     console.log(
-      `select: DeepSeek chose ${selectedIds.length} articles: [${selectedIds.join(',')}]`
+      `select: selector chose ${selectedIds.length} articles: [${selectedIds.join(',')}]`
     );
   } catch (err) {
-    console.error('select: DeepSeek failed:', err instanceof Error ? err.message : err);
+    console.error('select: selector failed:', err instanceof Error ? err.message : err);
     return;
   }
 
