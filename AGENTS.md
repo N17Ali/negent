@@ -37,7 +37,7 @@ Entry `src/index.ts` exports `default { fetch, scheduled }`:
 
 The `switch` in `src/index.ts` matches these literal cron strings from `wrangler.toml`:
 - `*/10 * * * *` → `cron/fetch.ts` (fetch one RSS source, save raw articles, rotate via `fetch_order`)
-- `0 */3 * * *` → `cron/select.ts` (DeepSeek selects top 10 → Gemini summarizes → deliver to subscribers)
+- `30 5,8,11,14,16 * * *` → `cron/select.ts` (DeepSeek selects top 10 → Gemini summarizes → deliver to subscribers) — fires at 9:00, 12:00, 15:00, 18:00, 20:00 Tehran time (UTC+3:30)
 
 If you change a cron expression in `wrangler.toml`, update the matching `case` in `index.ts` or that handler silently stops firing.
 

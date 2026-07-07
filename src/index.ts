@@ -30,7 +30,7 @@ export default {
       case '*/10 * * * *':
         ctx.waitUntil(fetchCron(env));
         break;
-      case '30 5,8,11,14 * * *':
+      case '30 5,8,11,14,16 * * *':
         ctx.waitUntil(selectCron(env));
         break;
       default:
