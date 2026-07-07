@@ -8,6 +8,7 @@ import {
   markArticlesSkipped,
   markArticlesSelected,
   getSelectedArticles,
+  getUndeliveredArticles,
   lockArticle,
   markArticleDone,
   markArticleFailed,
@@ -44,13 +45,22 @@ export async function selectCron(env: Env): Promise<void> {
   }
 
   const { results: rawRows } = await getRawArticlesBatch(env.DB, BATCH_SELECT_SIZE);
-  if (!rawRows.length) {
+  if (rawRows.length) {
+    console.log(`select: ${rawRows.length} raw articles found`);
+    await selectAndSummarize(env, rawRows);
+  } else {
     console.log('select: no raw articles to select from');
-    return;
   }
 
-  console.log(`select: ${rawRows.length} raw articles found`);
+  // Delivery runs regardless of whether new raw articles were selected this run,
+  // so any already-summarized backlog still ships.
+  await deliver(env);
+}
 
+async function selectAndSummarize(
+  env: Env,
+  rawRows: { id: number; title: string; content_snippet: string | null; source_name: string | null }[]
+): Promise<void> {
   const { results: recent } = await getRecentDeliveredTitles(env.DB, 30);
   const recentTitles = recent.map((r) => r.title);
 
@@ -129,15 +139,16 @@ export async function selectCron(env: Env): Promise<void> {
   }
 
   console.log(`select: summarized ${succeeded}/${selectedArticles.length} articles`);
+}
 
+async function deliver(env: Env): Promise<void> {
   const { results: subscribers } = await getActiveSubscribers(env.DB);
   if (!subscribers.length) {
     console.log('select: no active subscribers');
     return;
   }
 
-  const { results: doneArticles } = await getSelectedArticles(env.DB);
-  const readyArticles = doneArticles.filter((a) => a.status === 'done');
+  const { results: readyArticles } = await getUndeliveredArticles(env.DB, 50);
   if (!readyArticles.length) {
     console.log('select: no articles ready for delivery');
     return;
