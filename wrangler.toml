@@ -4,9 +4,13 @@ compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 [triggers]
+# Tehran is UTC+3:30. These UTC times land on clean Tehran wall-clock hours
+# every 3h within the 9am-9pm delivery window: 05:30->09:00, 08:30->12:00,
+# 11:30->15:00, 14:30->18:00 Tehran. (17:30 UTC / 21:00 Tehran is excluded
+# since delivery ends at 21:00.)
 crons = [
   "*/10 * * * *",
-  "0 */3 * * *"
+  "30 5,8,11,14 * * *"
 ]
 
 [[d1_databases]]
