@@ -1,128 +1,114 @@
-# Negent — Implementation Plan
+# Negent — Design Notes
+
+> This started as an implementation plan and now documents the **shipped design**. Where it disagrees with the code, the code (`src/`, `wrangler.toml`, `schema.sql`, `src/utils/constants.ts`) wins. `AGENTS.md` / `CLAUDE.md` cover day-to-day workflow; this file keeps the "why" — free-tier budget, message format, error-handling rationale.
 
 ## Context
 
-Build a Telegram bot on **Cloudflare Workers free tier** that aggregates tech/AI/programming news from international RSS feeds, summarizes and translates them to Persian (informal tone) using Google Gemini free API, and sends each article as a separate Telegram message every 3 hours. No VPS, no paid services.
+A Telegram bot on **Cloudflare Workers free tier** that aggregates tech/AI/programming/gaming news from international RSS feeds, uses **DeepSeek** to pick the most important stories, then **summarizes and translates them to Persian** (informal tone) with Google **Gemini**, and delivers each as a separate Telegram message during Tehran daytime hours. No VPS, no paid services.
 
 ## Architecture
 
-3 Cron Triggers (of 5 allowed) + D1 database + Telegram webhook:
+2 Cron Triggers + D1 database + Telegram webhook:
 
 ```
-FETCH (*/20 * * * *)          PROCESS (1-59/20 * * * *)       DELIVER (0 */3 * * *)
-Fetch ONE RSS source          Pick ONE raw article             Send all done articles
-per run, rotate               → Gemini summarize+translate     to all subscribers
-through pool                  → Save Persian summary           via Telegram API
-Save raw articles to D1       to D1                            Mark as delivered
+FETCH  (*/10 * * * *)              SELECT  (30 5,8,11,14 * * *  UTC)
+Fetch ONE RSS source per run,      = 09:00 / 12:00 / 15:00 / 18:00 Tehran (UTC+3:30)
+rotate through the pool.           1. DeepSeek picks top 10 of up to 200 raw titles
+Keyword-filter, dedup by           2. Gemini summarizes+translates each pick to Persian
+url_hash, save as status='raw'.    3. Deliver to all active subscribers, mark delivered
 ```
 
-Each invocation does minimal CPU work (<5ms). All heavy lifting (fetch, Gemini, Telegram API, D1) is I/O and doesn't count toward the 10ms CPU limit.
+Selection, summarization, and delivery all happen inside the **one** `select` cron (`src/cron/select.ts`) — there is no separate `process`/`deliver` cron. Each invocation does minimal CPU work; all heavy lifting (fetch, DeepSeek, Gemini, Telegram, D1) is I/O and doesn't count toward the CPU limit.
+
+**Timezone gotcha:** the crons run in UTC but delivery is gated to 9am–9pm `Asia/Tehran`. Tehran is UTC+**3:30**, so a cron on whole UTC hours lands at `:30` past the Tehran hour. `30 5,8,11,14` maps to clean **09:00/12:00/15:00/18:00 Tehran**. The old `0 */3 * * *` landed at `:30` and its 21:30 run fired only to hit the delivery-hours skip — don't reintroduce that.
+
+**Dispatch coupling:** `src/index.ts` matches the literal cron strings from `wrangler.toml` by exact string. Change one, change both, or the handler silently stops firing.
 
 ## Project Structure
 
 ```
 negent/
 ├── wrangler.toml              # Worker config, crons, D1 binding
-├── package.json
-├── tsconfig.json
 ├── schema.sql                 # D1 schema
+├── seed.sql                   # Default RSS sources
+├── migration_001_category_score.sql
 └── src/
     ├── index.ts               # Entry: cron dispatcher + webhook handler
-    ├── types.ts               # TypeScript interfaces
+    ├── types.ts               # Env + row interfaces (source of truth for bindings)
     ├── db.ts                  # D1 query helpers
     ├── cron/
-    │   ├── fetch.ts           # Fetch one RSS source, save articles
-    │   ├── process.ts         # Gemini summarize+translate one article
-    │   └── deliver.ts         # Send to Telegram subscribers
+    │   ├── fetch.ts           # Fetch one RSS source, filter, dedup, save raw
+    │   └── select.ts          # DeepSeek select → Gemini summarize → deliver
     ├── services/
     │   ├── rss.ts             # Lightweight RSS/Atom parser (no deps)
-    │   ├── gemini.ts          # Gemini API client
-    │   ├── telegram.ts        # Telegram Bot API client
-    │   └── media.ts           # Media URL extraction from RSS
+    │   ├── media.ts           # Media URL extraction from RSS
+    │   ├── deepseek.ts        # DeepSeek selection client (NVIDIA API)
+    │   ├── gemini.ts          # Gemini summarize/translate client (+ Gemma fallback)
+    │   └── telegram.ts        # Telegram Bot API client
     ├── bot/
-    │   └── commands.ts        # /start, /stop, /sources, /add, /remove
+    │   └── commands.ts        # /start, /stop, /sources, /status
     └── utils/
-        └── constants.ts       # Config values
+        ├── constants.ts       # Config values, keyword lists, model names
+        ├── filter.ts          # Keyword relevance filter (fetch stage)
+        └── dedup.ts           # Dedup helpers
 ```
 
-Zero external runtime dependencies. RSS parsed with indexOf/regex, not a DOM library.
+Zero external runtime dependencies. RSS is parsed with string/regex, not a DOM library — keep it that way.
 
 ## D1 Schema
 
 4 tables:
-- **sources** — RSS feed pool (url, name, active, fetch_order for rotation). User-modifiable via bot commands.
-- **articles** — Raw + processed articles (url_hash for dedup, status: raw→processing→done→failed, summary_fa, media_url/media_type, retry_count max 3)
-- **subscribers** — Telegram users (chat_id, is_active, is_admin). First /start user becomes admin.
-- **delivery_log** — Per-subscriber send tracking for error handling.
+- **sources** — RSS feed pool (`url`, `name`, `active`, `fetch_order` for rotation). Seeded from `seed.sql`; no bot commands mutate it.
+- **articles** — raw + processed articles. `url_hash` (SHA-256 of normalized URL) for dedup; `status` in `raw → selected → done`/`failed`, plus `skipped`, `processing`; `summary_fa`, `category`, `relevance_score`, `media_url`/`media_type`, `retry_count`, `delivered`.
+- **subscribers** — Telegram users (`chat_id`, `is_active`, `is_admin`). First `/start` user becomes admin (enforced in `upsertSubscriber` SQL).
+- **delivery_log** — per-subscriber send tracking; also backs the per-hour rate-limit count.
 
-Dedup: `UNIQUE INDEX` on `url_hash` (SHA-256 of normalized URL). `INSERT OR IGNORE` handles collisions with zero extra queries.
+Dedup: `UNIQUE INDEX` on `url_hash`. `INSERT OR IGNORE` handles collisions with no extra queries.
 
 ## Cron Details
 
-### Fetch (every 20 min)
-1. Pick source with lowest `fetch_order`
-2. `fetch()` RSS URL
-3. Parse items with lightweight string-based XML extractor
-4. Normalize URLs (strip utm_* params), compute SHA-256 hash
-5. `INSERT OR IGNORE` into articles (dedup by url_hash)
-6. Extract media from `<enclosure>`, `<media:content>`, `<media:thumbnail>`, or first `<img>`
-7. Advance source's `fetch_order` to end of rotation
+### Fetch (`*/10 * * * *`)
+1. `cleanupOldArticles` deletes articles older than 24h (any terminal/raw status).
+2. Pick the source with lowest `fetch_order`.
+3. `fetch()` the RSS URL (custom User-Agent); on non-OK/error, advance rotation and bail.
+4. Parse items (auto-detect Atom vs RSS), extract media from `<enclosure>`/`<media:content>`/`<media:thumbnail>`/first `<img>`.
+5. Keyword-filter with `utils/filter.ts` (AI / programming / gaming term lists in `constants.ts`); skip irrelevant.
+6. Compute `url_hash`, `INSERT OR IGNORE` (dedup).
+7. Advance the source's `fetch_order` to the end of the rotation.
 
-### Process (every 20 min, offset 1 min)
-1. Unstick articles stuck in 'processing' >10 min
-2. Pick oldest raw/failed (retry<3) article
-3. Optimistic lock: `UPDATE SET status='processing' WHERE status IN ('raw','failed')`
-4. Call Gemini 2.0 Flash with single prompt: summarize + translate to informal Persian + JSON output
-5. Save `summary_fa`, set `status='done'`
-6. On error: set `status='failed'`, increment `retry_count`
+### Select (`30 5,8,11,14 * * *`)
+1. Bail early if outside Tehran delivery hours (`DELIVERY_START_HOUR`–`DELIVERY_END_HOUR`).
+2. Load up to `BATCH_SELECT_SIZE` (200) raw articles + recently delivered titles (for de-duplication context).
+3. **DeepSeek** picks `SELECT_TOP_N` (10); mark the rest `skipped`, mark picks `selected`.
+4. For each pick: optimistic `lockArticle`, then **Gemini** summarize+translate → `done` with `summary_fa`, `category`, `relevance_score`; on error → `failed`.
+5. `rotateCategories` orders the ready articles so no more than `MAX_SAME_CATEGORY_IN_ROW` (3) of one category ship consecutively.
+6. Deliver to each active subscriber up to their remaining hourly quota (`MAX_MESSAGES_PER_HOUR`, 10). Telegram `BLOCKED` → deactivate subscriber; `RATE_LIMITED` → stop.
 
-### Deliver (every 3 hours)
-1. Select up to 10 done+undelivered articles
-2. Select all active subscribers
-3. For each article x subscriber:
-   - Has photo? → `sendPhoto` with caption
-   - Has video? → `sendVideo` with caption
-   - Otherwise → `sendMessage` with HTML
-4. Handle: 429 → stop batch (next cron picks up), 403 → deactivate subscriber
-5. Mark articles as delivered
+## Model Integrations
 
-## Gemini Integration
+### DeepSeek selection (`services/deepseek.ts`)
+- Model `deepseek-ai/deepseek-v4-pro` via `https://integrate.api.nvidia.com/v1/chat/completions`, `temperature: 1`, key `NVIDIA_API_KEY`.
+- Returns `{"selected": [{"id", "reason"}, ...]}`. Response may be wrapped in ```` ```json ```` fences — stripped before parse.
+- Retries with backoff on 429/503/524 (524 = NVIDIA upstream timeout).
 
-Model: `gemini-2.0-flash` with `responseMimeType: "application/json"`, temperature 0.3.
-
-Single prompt: summarize in 2-3 paragraphs, informal Persian (use "تو" not "شما"), keep tech terms in English, return `{"summary": "..."}`.
-
-Usage: ~72 req/day out of 1500 free = 4.8%.
+### Gemini summarize/translate (`services/gemini.ts`)
+- Primary `GEMINI_MODEL` = `gemini-3.1-flash-lite`; on rate-limit, falls back to `GEMMA_MODEL` = `gemma-4-31b-it`. Key `GEMINI_API_KEY`.
+- Single prompt: summarize in informal Persian (use "تو" not "شما", keep tech terms in English), return JSON with `summary` / `category` / `relevance_score`.
 
 ## Telegram Bot Commands
 
 | Command | Action |
 |---------|--------|
-| `/start` | Subscribe (first user = admin) |
+| `/start` | Subscribe (first user = admin); new users also get one recent article as a sample |
 | `/stop` | Unsubscribe |
-| `/sources` | List all sources with status |
-| `/add <url> [name]` | Add RSS source (admin only) |
-| `/remove <id>` | Remove source (admin only) |
+| `/sources` | List all sources with active/paused status |
+| `/status` | Pipeline stats (admin only) |
 
-Webhook registered at `https://negent.<subdomain>.workers.dev/webhook/<BOT_TOKEN>`.
+There is **no** `/add` or `/remove` — sources are managed via `seed.sql`. Webhook route: `/webhook/<BOT_TOKEN>` (token in path), registered via Telegram `setWebhook`.
 
-## Default Sources
+## Default Sources (`seed.sql`)
 
-1. TechCrunch — `https://techcrunch.com/feed/`
-2. The Verge — `https://www.theverge.com/rss/index.xml`
-3. Ars Technica — `https://feeds.arstechnica.com/arstechnica/index`
-4. Hacker News — `https://hnrss.org/frontpage`
-5. OpenAI Blog — `https://openai.com/blog/rss.xml`
-6. Dev.to — `https://dev.to/feed`
-
-## Free Tier Budget (daily worst case)
-
-| Resource | Used | Limit | % |
-|----------|------|-------|---|
-| D1 reads | ~1,800 | 5,000,000 | 0.04% |
-| D1 writes | ~2,600 | 100,000 | 2.6% |
-| Gemini calls | 72 | 1,500 | 4.8% |
-| Worker invocations | ~200 | 100,000 | 0.2% |
+TechCrunch · The Verge · Ars Technica · Hacker News · OpenAI Blog · Dev.to · IGN · Eurogamer · Rock Paper Shotgun (9 total).
 
 ## Telegram Message Format
 
@@ -133,41 +119,31 @@ Webhook registered at `https://negent.<subdomain>.workers.dev/webhook/<BOT_TOKEN
 
 پاراگراف دوم...
 
-پاراگراف سوم (اختیاری)...
-
 🔗 <a href="URL">منبع</a> | 📡 TechCrunch
 ```
 
-If article has media → sent via `sendPhoto`/`sendVideo` with the above as caption.
-If caption exceeds 1024 chars → fallback to `sendMessage` + media URL as link.
+If the article has media it's sent via `sendPhoto`/`sendVideo` with the above as caption. Captions are bounded by `MAX_CAPTION_LENGTH`; longer text falls back to `sendMessage`.
 
 ## Error Handling
 
-- RSS fetch fails → skip, advance rotation, retry next cycle
-- Gemini error/rate limit → mark article `failed`, retry up to 3 times
-- Article stuck in `processing` >10 min → reset to `failed`
-- Telegram 429 → stop batch, next cron picks up remaining
-- Telegram 403 (blocked) → deactivate subscriber
-- `sendPhoto` fails → fallback to `sendMessage`
+- RSS fetch fails → skip, advance rotation, retry next cycle.
+- DeepSeek fails → log and skip the select run (no articles marked).
+- Gemini error → mark that article `failed`; Gemini rate-limit → fall back to Gemma.
+- Article stuck in `processing` >10 min → reset to `failed` (`unstickProcessing`), `retry_count++`.
+- Telegram `RATE_LIMITED` → stop the batch; next cron picks up. `BLOCKED` → deactivate subscriber.
+- `sendPhoto`/`sendVideo` failure → fall back to `sendMessage`.
 
-## Implementation Order
+## Free-Tier Budget (rough daily worst case)
 
-1. Scaffold project (wrangler, package.json, tsconfig, types)
-2. D1 schema + seed default sources
-3. RSS parser + media extractor
-4. Gemini service
-5. Telegram service
-6. Fetch cron
-7. Process cron
-8. Deliver cron
-9. Webhook handler + bot commands
-10. Wire everything in index.ts
+| Resource | Notes |
+|----------|-------|
+| Worker invocations | ~150/day (144 fetch + 4 select) — well under 100k |
+| D1 reads/writes | thousands/day — far under 5M read / 100k write |
+| Gemini calls | ~40/day (≤10 picks × 4 select runs) out of 1500 free |
+| DeepSeek calls | 4/day (one per select run) |
 
-## Verification
+## Local Verification
 
-1. `wrangler dev` → test cron triggers locally via `curl localhost:8787/__scheduled?cron=...`
-2. Verify RSS parsing against all 6 default feeds
-3. Verify Gemini returns valid Persian JSON
-4. Send test message to own Telegram via `/start`
-5. `wrangler deploy` → verify crons fire via `wrangler tail`
-6. Register webhook → test `/start`, `/sources`, `/add`, `/remove`
+1. `wrangler dev` → invoke crons via `curl 'localhost:8787/__scheduled?cron=*/10+*+*+*+*'`.
+2. `npm test` for pure-logic unit tests (RSS, media, Gemini/DeepSeek JSON, Telegram formatting).
+3. `/start` from your own Telegram against a deployed instance; watch `wrangler tail`.
