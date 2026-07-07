@@ -156,7 +156,7 @@ export function lockArticle(db: D1Database, articleId: number) {
   return db
     .prepare(
       `UPDATE articles SET status = 'processing', processed_at = datetime('now')
-       WHERE id = ? AND status IN ('raw', 'failed')`
+       WHERE id = ? AND status IN ('raw', 'selected', 'failed')`
     )
     .bind(articleId)
     .run();
