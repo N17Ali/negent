@@ -29,8 +29,8 @@ import { base64ToBytes, concatBytes, pcmToWav } from '../utils/audio';
 const WS_URL =
   'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // Tight per-chunk timeouts: a scheduled Worker has a bounded run duration, so a single
-// stalled Live API turn must not sit for a minute. These bound one chunk; the whole voice
-// pass is additionally capped by AUDIO_PASS_BUDGET_MS in select.ts.
+// stalled Live API turn must not sit for a minute. These bound one chunk; delivery voices
+// one article per cron tick (cron/deliver.ts), so a whole article stays well within limits.
 const CONNECT_TIMEOUT_MS = 10000;
 const GENERATION_TIMEOUT_MS = 30000;
 

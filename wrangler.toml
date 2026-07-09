@@ -7,10 +7,17 @@ compatibility_flags = ["nodejs_compat"]
 # Tehran is UTC+3:30. The select cron runs hourly on UTC minute :30, which lands on
 # clean Tehran wall-clock hours. Every UTC hour 05:30–16:30 maps to 09:00–20:00 Tehran,
 # inside the 9am–9pm delivery window. (17:30 UTC / 21:00 Tehran is excluded since
-# delivery ends at 21:00.) So the bot delivers up to SELECT_TOP_N (3) important
-# articles once per hour across the window.
+# delivery ends at 21:00.) So the bot selects up to SELECT_TOP_N (3) important articles
+# once per hour across the window.
+#
+# Delivery is decoupled onto its own cron that fires every 10 min at the :05,:15,… offset,
+# interleaved between the fetch ticks (:00,:10,…) so the two never share an invocation.
+# It ships ONE ready article per tick (text + its voice reading together), gated at runtime
+# to Tehran delivery hours and to MAX_MESSAGES_PER_HOUR per subscriber. So the 3 hourly
+# picks drain out roughly 10 minutes apart, each with voice attached.
 crons = [
   "*/10 * * * *",
+  "5-59/10 * * * *",
   "30 5,6,7,8,9,10,11,12,13,14,15,16 * * *"
 ]
 

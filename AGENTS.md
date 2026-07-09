@@ -21,11 +21,12 @@ Tests: `npm test` (Vitest, run once) or `npm run test:watch`. Tests live next to
 curl 'http://localhost:8787/__scheduled?cron=*/20+*+*+*+*'
 ```
 
-To run the full select→summarize→deliver pipeline on demand (e.g. testing at night, outside Tehran delivery hours), hit the token-gated manual endpoint. Add `?force=1` to bypass **both** the delivery-hours gate and the per-subscriber rate limit:
+Selection and delivery are separate endpoints. `/run-select` runs selection → summarization (produces `done` articles); `/run-deliver` ships **one** ready article (text + voice). Both are token-gated; `?force=1` bypasses the delivery-hours gate (and, for deliver, the per-subscriber rate limit) so the bot can be exercised at night:
 ```
 curl 'http://localhost:8787/run-select/<BOT_TOKEN>?force=1'
+curl 'http://localhost:8787/run-deliver/<BOT_TOKEN>?force=1'   # hit repeatedly to drain the backlog
 ```
-Without `force`, the endpoint still honors delivery hours and the rate limit, exactly like the cron.
+Without `force`, both honor delivery hours (and deliver honors the rate limit), exactly like the crons.
 
 ## Setup gotchas
 
@@ -43,31 +44,32 @@ Entry `src/index.ts` exports `default { fetch, scheduled }`:
 
 The `switch` in `src/index.ts` matches these literal cron strings from `wrangler.toml`:
 - `*/10 * * * *` → `cron/fetch.ts` (fetch one RSS source, save raw articles, rotate via `fetch_order`)
-- `30 5,6,7,8,9,10,11,12,13,14,15,16 * * *` → `cron/select.ts` (Gemini selects top 3 → Gemini summarizes → deliver to subscribers → best-effort voice reading)
+- `5-59/10 * * * *` → `cron/deliver.ts` (ship ONE ready `done` article: voice-first, then text + voice together). Interleaved at :05,:15,… between the fetch ticks so audio synthesis never shares a run with fetch.
+- `30 5,6,7,8,9,10,11,12,13,14,15,16 * * *` → `cron/select.ts` (Gemini selects top 3 → Gemini summarizes into `done` articles)
 
 If you change a cron expression in `wrangler.toml`, update the matching `case` in `index.ts` or that handler silently stops firing.
 
 ### Timezone: crons are UTC but delivery is gated to Tehran (UTC+3:30)
 
-`select.ts` skips when the current hour is outside `DELIVERY_START_HOUR`–`DELIVERY_END_HOUR` (9–21) in `Asia/Tehran`. Because Tehran is UTC+**3:30**, a cron on whole UTC hours lands at `:30` past the Tehran hour. The select cron runs hourly at UTC minute `:30` on hours `5..16`, mapping to **09:00–20:00 Tehran** (one run per hour in the window; 17:30 UTC / 21:00 Tehran excluded). When editing the select schedule, keep the UTC→Tehran mapping on clean hours and never on/after 21:00, or the run fires only to hit the delivery-hours skip.
+Both `select.ts` and `deliver.ts` skip when the current hour is outside `DELIVERY_START_HOUR`–`DELIVERY_END_HOUR` (9–21) in `Asia/Tehran` (shared `isWithinDeliveryHours` in `utils/time.ts`). Because Tehran is UTC+**3:30**, a cron on whole UTC hours lands at `:30` past the Tehran hour. The select cron runs hourly at UTC minute `:30` on hours `5..16`, mapping to **09:00–20:00 Tehran** (one run per hour in the window; 17:30 UTC / 21:00 Tehran excluded). The deliver cron fires every 10 min but its runtime gate makes night ticks no-ops. When editing the select schedule, keep the UTC→Tehran mapping on clean hours and never on/after 21:00, or the run fires only to hit the delivery-hours skip.
 
 ### Data flow
 
-`sources` → fetch cron pulls one source/run (keyword-filtered by `utils/filter.ts`, deduped by `url_hash`) → `articles` (status `raw`) → select cron sends up to `BATCH_SELECT_SIZE` (300, newest first) raw titles to Gemini → Gemini picks `SELECT_TOP_N` (3) → marks the rest `skipped` → Gemini summarizes the 3 → delivers to all active `subscribers` (marks `delivered=1`) → sends a Persian voice reading of each (best-effort).
+`sources` → fetch cron pulls one source/run (keyword-filtered by `utils/filter.ts`, deduped by `url_hash`) → `articles` (status `raw`) → select cron sends up to `BATCH_SELECT_SIZE` (newest first) raw titles to Gemini → Gemini picks `SELECT_TOP_N` (3) → marks the rest `skipped` → Gemini summarizes the 3 into `done` articles (`delivered=0`) → the separate **deliver cron** ships one `done` article per tick: generates the voice, then sends text + voice together (audio quotes the text message), marks `delivered=1` once it reaches ≥1 subscriber.
 
 - Article states: `raw → selected → done` (or `failed`); non-selected articles marked `skipped`. `cleanupOldArticles` deletes rows (including stuck `processing`) older than 24h; it removes dependent `delivery_log` rows **first** because the FK has no `ON DELETE CASCADE`. `fetchCron` also runs cleanup inside try/catch so a cleanup error can't block inserts.
 - Cross-source dedup is handled by the **selector LLM prompt** (pick one article per story), not a code module — `utils/dedup.ts` was removed.
 - First subscriber to `/start` becomes admin (`is_admin=1`), enforced in the `upsertSubscriber` SQL — not in app code.
 - `/start` sends only a greeting (no sample article).
-- Delivery respects Tehran delivery hours (see above) and a rolling rate limit of `MAX_MESSAGES_PER_HOUR` (3) successful sends per subscriber per hour (`getSubscriberMessageCount` counts `delivery_log` rows from the last hour). `rotateCategories` interleaves categories so no more than `MAX_SAME_CATEGORY_IN_ROW` (3) of one category ship in a row.
+- Delivery respects Tehran delivery hours (see above) and a rolling rate limit of `MAX_MESSAGES_PER_HOUR` (3) successful sends per subscriber per hour (`getSubscriberMessageCount` counts `delivery_log` rows from the last hour, checked every deliver tick so the 10-min cadence still can't exceed 3/hour). The deliver cron sends one article per tick — no in-run category rotation.
 - Sources are managed via `seed.sql` only — no bot commands for add/remove.
 
 ### External model services
 
 - **Gemini selection** (`services/selector.ts`): sends up to `BATCH_SELECT_SIZE` raw titles to primary `GEMINI_MODEL` via `generativelanguage.googleapis.com`, `temperature: 1`, `responseMimeType: application/json`. On rate-limit (429) it falls back to `GEMMA_MODEL`. Strips ```` ```json ```` fences before parsing; retries with backoff on 429/503.
 - **Gemini summarize/translate** (`services/gemini.ts`): same primary/fallback pair. Prompt targets 2–4 finished paragraphs under ~900 chars so summaries fit one Telegram message; `maxOutputTokens` 4096 to avoid mid-output truncation.
-- **Voice audio** (`services/tts.ts`): `AUDIO_MODEL` (`gemini-2.5-flash-native-audio-latest`) is a **Live API** model — WebSocket-only (`fetch` with `Upgrade: websocket` → `response.webSocket.accept()`), not `generateContent`. Sends a `setup` (audio modality + `AUDIO_VOICE` + a Persian system instruction with pronunciation guidance — abbreviations spelled out, English tech terms kept English) then a text turn; collects base64 PCM (16-bit mono, `AUDIO_SAMPLE_RATE` 24kHz) from `serverContent.modelTurn.parts[].inlineData` until `turnComplete`. Long text is split into `AUDIO_CHUNK_CHARS` chunks (long single generations drift in quality) and each chunk's PCM is concatenated. `utils/audio.ts` wraps the PCM in a WAV container (no deps) for Telegram `sendAudio`. Gated by `SEND_AUDIO`; any failure is swallowed so text still ships.
-- **Audio is a second delivery pass, not inline.** `deliver()` sends all TEXT first, recording per article which subscribers got it, then `deliverAudio()` synthesizes each article **once** and fans the same WAV out to every recipient (never re-synthesize per subscriber — TTS is the slowest work in the run). The audio pass is capped by `AUDIO_PASS_BUDGET_MS`: when the wall-clock budget is exceeded it stops voicing remaining articles and logs the skipped ids, so a slow Live API session can't push the scheduled invocation past its duration limit (the `exceededCpu`/killed-invocation failure mode). Per-chunk `CONNECT_TIMEOUT_MS`/`GENERATION_TIMEOUT_MS` bound a single stalled turn.
+- **Voice audio** (`services/tts.ts`): `AUDIO_MODEL` (`gemini-2.5-flash-native-audio-latest`) is a **Live API** model — WebSocket-only (`fetch` with `Upgrade: websocket` → `response.webSocket.accept()`), not `generateContent`. Sends a `setup` (audio modality + `AUDIO_VOICE` + a Persian system instruction with pronunciation guidance — abbreviations spelled out, English tech terms kept English) then a text turn; collects base64 PCM (16-bit mono, `AUDIO_SAMPLE_RATE` 24kHz) from `serverContent.modelTurn.parts[].inlineData` until `turnComplete`. Text is split into short `AUDIO_CHUNK_CHARS` (700) chunks — the voice **drifts robotic within a long single generation**, so each chunk is a fresh turn and the PCM is concatenated. `utils/audio.ts` wraps the PCM in a WAV container (no deps) for Telegram `sendAudio`. Gated by `SEND_AUDIO`; any failure is swallowed so text still ships. Per-chunk `CONNECT_TIMEOUT_MS`/`GENERATION_TIMEOUT_MS` bound a single stalled turn.
+- **One article, voice-first, per deliver tick.** `deliverCron` (`cron/deliver.ts`) generates the WAV **before** sending anything, then for each eligible subscriber sends the text and immediately the voice as a reply to it (`sendAudio(..., replyToMessageId)`), so text + voice arrive together and the audio quotes the article. Because delivery is its own cron (one article per invocation), there's no per-run audio budget — the old `deliver()`/`deliverAudio()` two-pass-in-select design and `AUDIO_PASS_BUDGET_MS` are gone. Splitting audio off select is what removed the `exceededCpu` kills that silently dropped voices.
 
 Both Gemini stages share the one `GEMINI_API_KEY` and its free-tier quota.
 

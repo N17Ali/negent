@@ -163,12 +163,19 @@ export async function sendAudio(
   chatId: number,
   wav: Uint8Array,
   title: string,
-  token: string
+  token: string,
+  replyToMessageId?: number
 ): Promise<boolean> {
   const form = new FormData();
   form.append('chat_id', String(chatId));
   form.append('title', title.slice(0, 64));
   form.append('performer', 'negent');
+  // Quote the article's text message so the voice reading shows up as a reply beneath it.
+  // allow_sending_without_reply so a deleted/missing text message still lets the audio send.
+  if (replyToMessageId != null) {
+    form.append('reply_to_message_id', String(replyToMessageId));
+    form.append('allow_sending_without_reply', 'true');
+  }
   form.append(
     'audio',
     new Blob([wav], { type: 'audio/wav' }),

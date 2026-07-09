@@ -31,18 +31,12 @@ export const AUDIO_SAMPLE_RATE = 24000; // Live API returns 16-bit mono PCM at 2
 export const AUDIO_MAX_CHARS = 15000; // hard cap on total text read aloud — high enough to
 // read a whole article end-to-end (we never summarize the audio), but bounded so a
 // pathologically long body can't spawn dozens of WebSocket sessions.
-export const AUDIO_CHUNK_CHARS = 1500; // ~500 tokens of Persian per chunk. Each chunk is
-// synthesized in its own Live API turn and the PCM is concatenated, so long single
-// generations can't drift/turn robotic. chunkText only ever breaks on paragraph or
-// sentence boundaries, so a chunk never ends mid-statement.
-
-// Wall-clock ceiling for the whole voice pass within one select run. TTS over the Live
-// API WebSocket is the slowest work in the cron and a scheduled Worker has a bounded
-// duration (overrunning it kills the invocation — see the `exceededCpu` outcome in tail).
-// Text is already delivered before this pass starts, so when the budget is hit we simply
-// stop voicing the remaining articles and log what was skipped rather than risk the
-// invocation being terminated mid-send.
-export const AUDIO_PASS_BUDGET_MS = 20000;
+export const AUDIO_CHUNK_CHARS = 700; // ~230 tokens of Persian per chunk. The native-audio
+// Live API degrades WITHIN a single generation — the voice drifts robotic toward the middle
+// and end of a long turn — so we keep chunks short and stitch the PCM. Each chunk is its own
+// Live API turn (fresh voice quality); chunkText only breaks on paragraph/sentence
+// boundaries so a chunk never ends mid-statement. Delivery is one article per cron tick with
+// spare time, so the extra WebSocket sessions from smaller chunks are not a concern.
 
 export const RELEVANT_KEYWORDS: Record<string, string[]> = {
   ai: [

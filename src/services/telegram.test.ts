@@ -268,4 +268,19 @@ describe('sendAudio', () => {
     const file = (fetchMock.mock.calls[0][1] as { body: FormData }).body.get('audio') as unknown as File;
     expect(file.name).toBe('a b c d.wav');
   });
+
+  it('quotes the text message when a reply id is given', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await sendAudio(1, wav, 'Article', 'TOKEN', 4242);
+    const form = (fetchMock.mock.calls[0][1] as { body: FormData }).body;
+    expect(form.get('reply_to_message_id')).toBe('4242');
+    expect(form.get('allow_sending_without_reply')).toBe('true');
+  });
+
+  it('omits reply fields when no reply id is given', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await sendAudio(1, wav, 'Article', 'TOKEN');
+    const form = (fetchMock.mock.calls[0][1] as { body: FormData }).body;
+    expect(form.get('reply_to_message_id')).toBeNull();
+  });
 });
