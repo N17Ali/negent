@@ -1,11 +1,10 @@
 import { Env, Source } from '../types';
-import { sendMessage, sendArticle } from '../services/telegram';
+import { sendMessage } from '../services/telegram';
 import {
   upsertSubscriber,
   unsubscribe,
   isAdmin,
   getAllSources,
-  getOneRecentArticle,
 } from '../db';
 
 interface TelegramUpdate {
@@ -28,11 +27,9 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
   console.log(`command from ${chatId} (${username || firstName}): "${text}"`);
 
   if (text === '/start') {
-    let isNew = false;
     try {
-      const result = await upsertSubscriber(env.DB, chatId, username, firstName);
-      isNew = result.isNew;
-      console.log(`upsertSubscriber OK for ${chatId} (isNew=${isNew})`);
+      await upsertSubscriber(env.DB, chatId, username, firstName);
+      console.log(`upsertSubscriber OK for ${chatId}`);
     } catch (err) {
       console.error('upsertSubscriber failed:', err instanceof Error ? err.message : err);
       throw err;
@@ -47,23 +44,6 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
       + '/stop — لغو اشتراک',
       env.BOT_TOKEN
     );
-
-    if (isNew) {
-      const article = await getOneRecentArticle(env.DB);
-      if (article) {
-        console.log(`start: sending welcome article ${article.id} to new subscriber ${chatId}`);
-        try {
-          await sendArticle(
-            chatId,
-            article,
-            article.source_name || '',
-            env.BOT_TOKEN
-          );
-        } catch (err) {
-          console.error('start: failed to send welcome article:', err instanceof Error ? err.message : err);
-        }
-      }
-    }
     return;
   }
 
@@ -100,54 +80,65 @@ export async function handleUpdate(update: TelegramUpdate, env: Env): Promise<vo
   if (text === '/status') {
     const admin = await isAdmin(env.DB, chatId);
     if (!admin?.is_admin) {
-      await sendMessage(chatId, '⛔ فقط ادمین.', env.BOT_TOKEN);
+      await sendMessage(chatId, '⛔ Admins only.', env.BOT_TOKEN);
       return;
     }
     const stats = await env.DB.batch([
       env.DB.prepare('SELECT COUNT(*) as c FROM sources WHERE active = 1'),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'raw'"),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'selected'"),
+      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'processing'"),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND delivered = 0"),
-      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'failed'"),
+      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE delivered = 1"),
       env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'skipped'"),
+      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'failed'"),
+      env.DB.prepare("SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND relevance_score >= 4"),
       env.DB.prepare('SELECT COUNT(*) as c FROM subscribers WHERE is_active = 1'),
       env.DB.prepare(
         "SELECT COALESCE(category, '?') as cat, COUNT(*) as c FROM articles WHERE status = 'done' GROUP BY category"
       ),
-      env.DB.prepare(
-        "SELECT COUNT(*) as c FROM articles WHERE status = 'done' AND relevance_score >= 4"
-      ),
     ]);
-    const [src, raw, selected, done, failed, skipped, subs, byCat, highScore] = stats;
-    const srcN = (src.results[0] as any).c;
-    const rawN = (raw.results[0] as any).c;
-    const selectedN = (selected.results[0] as any).c;
-    const doneN = (done.results[0] as any).c;
-    const failedN = (failed.results[0] as any).c;
-    const skippedN = (skipped.results[0] as any).c;
-    const subsN = (subs.results[0] as any).c;
-    const highScoreN = (highScore.results[0] as any).c;
-    const catLines = (byCat.results as any[])
-      .map((r) => `   ${r.cat}: ${r.c}`)
-      .join('\n');
+    const [src, raw, selected, processing, ready, delivered, skipped, failed, highScore, subs, byCat] =
+      stats;
+    const catLines = (byCat.results as { cat: string; c: number }[])
+      .map((r) => `   • ${r.cat}: ${r.c}`)
+      .join('\n') || '   • (none yet)';
     await sendMessage(
       chatId,
-      '📊 <b>وضعیت سیستم:</b>\n\n'
-        + `📡 منابع فعال: <b>${srcN}</b>\n`
-        + `📝 صف انتظار: <b>${rawN}</b>\n`
-        + `🎯 انتخاب‌شده: <b>${selectedN}</b>\n`
-        + `✅ آماده ارسال: <b>${doneN}</b>\n`
-        + `⭐ نمره بالا (4+): <b>${highScoreN}</b>\n`
-        + `⏭ رد شده: <b>${skippedN}</b>\n`
-        + `❌ ناموفق: <b>${failedN}</b>\n`
-        + `👥 مشترکین فعال: <b>${subsN}</b>\n\n`
-        + `📋 دسته‌بندی پردازش‌شده:\n${catLines}`,
+      '📊 <b>System status</b>\n'
+        + '<i>Pipeline: raw → selected → processing → ready → delivered</i>\n\n'
+        + `📡 <b>Active sources</b>: ${count(src)}\n`
+        + '   <i>RSS feeds currently being polled</i>\n\n'
+        + `📥 <b>Raw (queued)</b>: ${count(raw)}\n`
+        + '   <i>Fetched, waiting for the LLM to pick the best ones</i>\n\n'
+        + `🎯 <b>Selected</b>: ${count(selected)}\n`
+        + '   <i>Chosen by the LLM, waiting to be summarized</i>\n\n'
+        + `⚙️ <b>Processing</b>: ${count(processing)}\n`
+        + '   <i>Being summarized/translated right now</i>\n\n'
+        + `✅ <b>Ready to send</b>: ${count(ready)}\n`
+        + '   <i>Summarized, not yet delivered to subscribers</i>\n\n'
+        + `📤 <b>Delivered</b>: ${count(delivered)}\n`
+        + '   <i>Successfully sent out</i>\n\n'
+        + `⭐ <b>High score (4+)</b>: ${count(highScore)}\n`
+        + '   <i>Done articles the LLM rated most important</i>\n\n'
+        + `⏭ <b>Skipped</b>: ${count(skipped)}\n`
+        + '   <i>Not selected — filtered out as unimportant</i>\n\n'
+        + `❌ <b>Failed</b>: ${count(failed)}\n`
+        + '   <i>Summarize/deliver errored (see retry_count)</i>\n\n'
+        + `👥 <b>Active subscribers</b>: ${count(subs)}\n\n`
+        + `📋 <b>Done by category</b>:\n${catLines}`,
       env.BOT_TOKEN
     );
     return;
   }
 
   console.log(`unknown command: "${text}"`);
+}
+
+// D1 COUNT(*) helper — the count queries all alias the total to `c`.
+function count(result: D1Result): number {
+  const row = result.results[0] as { c: number } | undefined;
+  return row?.c ?? 0;
 }
 
 function escapeHtml(text: string): string {

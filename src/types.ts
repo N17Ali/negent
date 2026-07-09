@@ -28,6 +28,7 @@ export interface Article {
   fetched_at: string;
   status: 'raw' | 'processing' | 'done' | 'failed' | 'skipped' | 'selected';
   summary_fa: string | null;
+  full_fa: string | null;
   category: string | null;
   relevance_score: number | null;
   processed_at: string | null;
@@ -59,6 +60,7 @@ export interface FeedItem {
 
 export interface GeminiResult {
   summary: string;
+  full_fa: string;
   category: string;
   relevance_score: number;
 }

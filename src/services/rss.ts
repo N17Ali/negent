@@ -2,6 +2,14 @@ import { FeedItem } from '../types';
 import { MAX_CONTENT_LENGTH } from '../utils/constants';
 import { extractMedia } from './media';
 
+// We only keep MAX_CONTENT_LENGTH chars of the snippet, but full-content feeds
+// (content:encoded / Atom <content>) embed the whole article HTML — tens of KB per item.
+// decodeEntities + stripHtml run ~8 regex passes each, so decoding every item's full body
+// before slicing burns CPU proportional to total feed size and can trip the Worker's CPU
+// limit on big feeds. Slice the raw body to this bounded prefix FIRST; the extra headroom
+// over MAX_CONTENT_LENGTH covers HTML tags/entities that get stripped away.
+const RAW_CONTENT_LIMIT = MAX_CONTENT_LENGTH * 4;
+
 export function parseFeed(xml: string): FeedItem[] {
   const isAtom = xml.includes('<feed') && xml.includes('http://www.w3.org/2005/Atom');
   return isAtom ? parseAtom(xml) : parseRss(xml);
@@ -12,10 +20,11 @@ function parseRss(xml: string): FeedItem[] {
   return items.map((itemXml) => {
     const title = decodeEntities(firstTag(itemXml, 'title') || 'Untitled');
     const link = decodeEntities(firstTag(itemXml, 'link') || '');
-    const raw =
+    const raw = (
       firstTag(itemXml, 'content:encoded') ||
       firstTag(itemXml, 'description') ||
-      '';
+      ''
+    ).slice(0, RAW_CONTENT_LIMIT);
     const description = stripHtml(decodeEntities(raw)).slice(0, MAX_CONTENT_LENGTH);
     const pubDate = firstTag(itemXml, 'pubDate') || firstTag(itemXml, 'dc:date') || null;
     const { mediaUrl, mediaType } = extractMedia(itemXml);
@@ -29,7 +38,10 @@ function parseAtom(xml: string): FeedItem[] {
     const title = decodeEntities(firstTag(entryXml, 'title') || 'Untitled');
     const linkMatch = entryXml.match(/<link[^>]+href=["']([^"']+)["'][^>]*\/?>/);
     const link = linkMatch ? decodeEntities(linkMatch[1]) : '';
-    const raw = firstTag(entryXml, 'content') || firstTag(entryXml, 'summary') || '';
+    const raw = (firstTag(entryXml, 'content') || firstTag(entryXml, 'summary') || '').slice(
+      0,
+      RAW_CONTENT_LIMIT
+    );
     const description = stripHtml(decodeEntities(raw)).slice(0, MAX_CONTENT_LENGTH);
     const pubDate = firstTag(entryXml, 'published') || firstTag(entryXml, 'updated') || null;
     const { mediaUrl, mediaType } = extractMedia(entryXml);

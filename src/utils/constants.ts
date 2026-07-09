@@ -8,8 +8,8 @@ export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 export const GEMMA_MODEL = 'gemma-4-31b-it';
 export const PROCESS_BATCH_SIZE = 5;
 
-export const BATCH_SELECT_SIZE = 300;
-export const SELECT_TOP_N = 10;
+export const BATCH_SELECT_SIZE = 150;
+export const SELECT_TOP_N = 3;
 
 export const MIN_RELEVANCE_SCORE = 4;
 
@@ -17,9 +17,24 @@ export const MAX_ARTICLE_AGE_HOURS = 24;
 
 export const DELIVERY_START_HOUR = 9;
 export const DELIVERY_END_HOUR = 21;
-export const MAX_MESSAGES_PER_HOUR = 10;
+export const MAX_MESSAGES_PER_HOUR = 3;
 export const MAX_SAME_CATEGORY_IN_ROW = 3;
 export const TIMEZONE = 'Asia/Tehran';
+
+// Voice-audio delivery: read the full Persian summary aloud via the Gemini Live API
+// (native-audio model, WebSocket-only). Audio is best-effort — text always ships even
+// if this fails. Flip SEND_AUDIO to false to disable without touching the pipeline.
+export const SEND_AUDIO = true;
+export const AUDIO_MODEL = 'gemini-2.5-flash-native-audio-latest';
+export const AUDIO_VOICE = 'Sulafat'; // warm female voice
+export const AUDIO_SAMPLE_RATE = 24000; // Live API returns 16-bit mono PCM at 24kHz
+export const AUDIO_MAX_CHARS = 15000; // hard cap on total text read aloud — high enough to
+// read a whole article end-to-end (we never summarize the audio), but bounded so a
+// pathologically long body can't spawn dozens of WebSocket sessions.
+export const AUDIO_CHUNK_CHARS = 1500; // ~500 tokens of Persian per chunk. Each chunk is
+// synthesized in its own Live API turn and the PCM is concatenated, so long single
+// generations can't drift/turn robotic. chunkText only ever breaks on paragraph or
+// sentence boundaries, so a chunk never ends mid-statement.
 
 export const RELEVANT_KEYWORDS: Record<string, string[]> = {
   ai: [

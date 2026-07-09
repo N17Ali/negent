@@ -39,19 +39,22 @@ Entry `src/index.ts` exports `default { fetch, scheduled }`:
 
 The `switch` in `src/index.ts` matches literal cron strings from `wrangler.toml`. **If you change a cron expression in one file you must change the matching `case` in the other, or that handler silently stops firing.** Current pairing:
 - `*/10 * * * *` → `cron/fetch.ts`
-- `30 5,8,11,14,16 * * *` → `cron/select.ts`
+- `30 5,6,7,8,9,10,11,12,13,14,15,16 * * *` → `cron/select.ts`
 
 ### Timezone: the crons are UTC but delivery is gated to Tehran (UTC+3:30)
 
-`select.ts` refuses to run outside `DELIVERY_START_HOUR`–`DELIVERY_END_HOUR` (9–21) in `Asia/Tehran` (`constants.ts`). Because Tehran is UTC+**3:30**, a cron on whole UTC hours lands at `:30` past the Tehran hour. The select cron uses `30 5,8,11,14,16` (UTC) precisely so the runs map to **09:00 / 12:00 / 15:00 / 18:00 / 20:00 Tehran** — on-the-hour and inside the window. When editing the select schedule, verify the UTC→Tehran mapping stays on clean hours and never falls on/after 21:00, or the run fires only to be skipped by the delivery-hours guard.
+`select.ts` refuses to run outside `DELIVERY_START_HOUR`–`DELIVERY_END_HOUR` (9–21) in `Asia/Tehran` (`constants.ts`). Because Tehran is UTC+**3:30**, a cron on whole UTC hours lands at `:30` past the Tehran hour. The select cron runs hourly at UTC minute `:30` on hours `5..16`, mapping to **09:00–20:00 Tehran** (one run per hour inside the window; 17:30 UTC / 21:00 Tehran is excluded since delivery ends at 21:00). When editing the select schedule, verify the UTC→Tehran mapping stays on clean hours and never falls on/after 21:00, or the run fires only to be skipped by the delivery-hours guard.
 
 ### Data flow
 
-`sources` → `fetch` cron pulls **one** source per run (rotated via `fetch_order`), filters with `utils/filter.ts` keyword lists, dedups by `url_hash`, inserts as `status='raw'` → `select` cron sends up to `BATCH_SELECT_SIZE` (300, newest first) raw titles to Gemini, which returns `SELECT_TOP_N` (10) picks; the rest are marked `skipped` → Gemini summarizes/translates the picks → delivers to active `subscribers`.
+`sources` → `fetch` cron pulls **one** source per run (rotated via `fetch_order`), filters with `utils/filter.ts` keyword lists, dedups by `url_hash`, inserts as `status='raw'` → `select` cron sends up to `BATCH_SELECT_SIZE` (150, newest first) raw titles to Gemini, which returns `SELECT_TOP_N` (3) picks plus a **bucket** of important runner-ups; the picks go to `selected`, the bucket stays `raw` (reconsidered next run), and everything else is marked `skipped` → Gemini summarizes/translates the picks → delivers to active `subscribers`, then sends a Persian **voice reading** of each (best-effort).
 
-- Article states: `raw → selected → done` (or `failed`); non-picks → `skipped`. `lockArticle` gates concurrent processing.
+- Article states: `raw → selected → done` (or `failed`); non-picks → `skipped`, except selector "bucket" runner-ups which are left `raw` to be reconsidered next run. `lockArticle` gates concurrent processing.
 - Delivery ordering: `rotateCategories` in `select.ts` interleaves categories so no more than `MAX_SAME_CATEGORY_IN_ROW` of one category ship consecutively.
-- Rate limits: `MAX_MESSAGES_PER_HOUR` per subscriber; blocked users are auto-deactivated (`deactivateSubscriber`) on Telegram `BLOCKED`.
+- Rate limits: `MAX_MESSAGES_PER_HOUR` (3) per subscriber; blocked users are auto-deactivated (`deactivateSubscriber`) on Telegram `BLOCKED`. Combined with `SELECT_TOP_N` (3) this caps delivery at ~3 important articles/hour.
+- **Cross-source dedup is the LLM's job** (selector prompt), not a code module — the old `utils/dedup.ts` was removed.
+- **Voice audio** (`services/tts.ts`): `AUDIO_MODEL` (`gemini-2.5-flash-native-audio-latest`) is a Live API model reachable only over a **WebSocket** (`fetch(url,{headers:{Upgrade:'websocket'}})` → `response.webSocket.accept()`), not `generateContent`. It returns raw 16-bit mono PCM at `AUDIO_SAMPLE_RATE` (24kHz), which `utils/audio.ts` wraps in a WAV container (no deps) for Telegram `sendAudio`. Long text is chunked (`AUDIO_CHUNK_CHARS`) and the system instruction carries pronunciation guidance (abbreviations spelled out in Persian, English tech terms kept English). Gated by `SEND_AUDIO`; failures never block text delivery.
+- **Cleanup FK ordering:** `cleanupOldArticles` deletes dependent `delivery_log` rows **before** `articles` (the FK has no `ON DELETE CASCADE`); doing it in the wrong order throws `FOREIGN KEY constraint failed` and — since cleanup runs first in `fetchCron` — silently blocks all inserts. `fetchCron` also wraps cleanup in try/catch as a backstop. Cleanup now includes `processing` rows, reclaiming any orphaned by a killed worker.
 - First subscriber to `/start` becomes admin (`is_admin=1`) — enforced in `upsertSubscriber` SQL, not app code.
 - Sources are managed via `seed.sql` only; no bot commands add/remove them.
 

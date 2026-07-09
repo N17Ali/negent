@@ -166,15 +166,16 @@ export function markArticleDone(
   db: D1Database,
   articleId: number,
   summaryFa: string,
+  fullFa: string,
   category: string,
   relevanceScore: number
 ) {
   return db
     .prepare(
-      `UPDATE articles SET status = 'done', summary_fa = ?, category = ?, relevance_score = ?,
+      `UPDATE articles SET status = 'done', summary_fa = ?, full_fa = ?, category = ?, relevance_score = ?,
        processed_at = datetime('now') WHERE id = ?`
     )
-    .bind(summaryFa, category, relevanceScore, articleId)
+    .bind(summaryFa, fullFa, category, relevanceScore, articleId)
     .run();
 }
 
@@ -335,12 +336,20 @@ export function getAllSources(db: D1Database) {
   return db.prepare('SELECT * FROM sources ORDER BY name').all<Source>();
 }
 
-export function cleanupOldArticles(db: D1Database) {
-  return db
-    .prepare(
-      `DELETE FROM articles
-       WHERE fetched_at < datetime('now', '-24 hours')
-       AND status IN ('done', 'failed', 'raw', 'skipped')`
-    )
-    .run();
+// Delete articles older than the retention window. delivery_log.article_id has a
+// FK to articles(id) with no ON DELETE CASCADE, so the dependent delivery_log rows
+// MUST be deleted first or the whole statement aborts with a FOREIGN KEY error —
+// which previously killed fetchCron before any inserts ran. 'processing' is included
+// so rows orphaned by a worker killed mid-summarize also get reclaimed.
+export async function cleanupOldArticles(db: D1Database) {
+  const cond = `fetched_at < datetime('now', '-24 hours')
+       AND status IN ('done', 'failed', 'raw', 'skipped', 'processing')`;
+  const [, articleResult] = await db.batch([
+    db.prepare(
+      `DELETE FROM delivery_log WHERE article_id IN (
+         SELECT id FROM articles WHERE ${cond})`
+    ),
+    db.prepare(`DELETE FROM articles WHERE ${cond}`),
+  ]);
+  return articleResult;
 }

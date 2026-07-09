@@ -35,7 +35,26 @@ async function callWithRetry(
 
 1. Categorize into exactly ONE: "ai", "programming", or "gaming"
 2. Rate importance 1-5 (for display only)
-3. Summarize in 3-6 paragraphs
+3. Summarize in 2-4 paragraphs (field "summary")
+4. Produce a FULL faithful Persian translation of the whole article body (field "full_fa")
+
+## Length & completeness (important)
+
+- Keep the "summary" UNDER 900 characters so it fits in one Telegram message without being cut.
+- ALWAYS finish the final paragraph and the final sentence. Never stop mid-sentence or mid-word.
+- If you're running out of room in the summary, write FEWER paragraphs rather than cutting one off — a complete 2-paragraph summary beats a truncated 4-paragraph one.
+
+## Full translation ("full_fa") — this is what gets read aloud
+
+- Translate the ENTIRE article body into Persian — do NOT summarize or shorten it. Keep every paragraph and detail.
+- It's a translation, not a retelling: preserve the article's structure and flow.
+- This text is spoken aloud by a text-to-speech voice, so optimize it for LISTENING:
+  - Prefer SHORTER sentences — break long, clause-heavy sentences into two or three short ones.
+  - Use natural transitions between sentences and paragraphs so it flows when heard (e.g. «از طرف دیگه»، «در نهایت»، «نکته‌ی جالب اینه که»).
+  - Use punctuation that guides speech — commas for short pauses, periods for full stops — so the voice paces itself and doesn't run on.
+  - Expand abbreviations into spoken words where it helps the listener (write the full form the way it's said), instead of leaving a bare acronym mid-sentence.
+- Same Persian writing rules as below. Separate paragraphs with \\n\\n — the reader pauses between paragraphs, so group each idea into its own paragraph.
+- If the source body is very short, translate what's there; don't pad it.
 
 ## Persian writing rules
 
@@ -57,15 +76,15 @@ Article title: ${title}
 Article content: ${content}
 Source: ${sourceName}
 
-Respond in this exact JSON format (3 to 6 paragraphs, separated by \\n\\n):
-{"summary": "paragraph 1\\n\\nparagraph 2\\n\\n...up to paragraph 6", "category": "ai", "relevance_score": 4}`;
+Respond in this exact JSON format (summary 2 to 4 paragraphs separated by \\n\\n and under 900 characters; full_fa the complete translation separated by \\n\\n; every sentence finished):
+{"summary": "paragraph 1\\n\\nparagraph 2\\n\\n...up to paragraph 4", "full_fa": "full translation paragraph 1\\n\\nparagraph 2\\n\\n...", "category": "ai", "relevance_score": 4}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const requestBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 8192,
       responseMimeType: 'application/json',
     },
   });
@@ -133,6 +152,10 @@ async function callGemini(url: string, body: string): Promise<GeminiResult> {
   if (!parsed.category) throw new Error('No category in Gemini response');
   if (typeof parsed.relevance_score !== 'number')
     throw new Error('No relevance_score in Gemini response');
+
+  // full_fa is the full translation read aloud. Optional — if the model omits it, fall
+  // back to the summary so the article still ships (with a shorter voice reading).
+  if (!parsed.full_fa) parsed.full_fa = parsed.summary;
 
   return parsed;
 }

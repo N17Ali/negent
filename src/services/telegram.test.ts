@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sendArticle, sendMessage } from './telegram';
+import { sendArticle, sendMessage, sendAudio } from './telegram';
 import { Article } from '../types';
 
 function makeArticle(overrides: Partial<Article> = {}): Article {
@@ -16,6 +16,7 @@ function makeArticle(overrides: Partial<Article> = {}): Article {
     fetched_at: '2024-01-01',
     status: 'done',
     summary_fa: 'Summary text.',
+    full_fa: 'Full translation text.',
     category: 'ai',
     relevance_score: 4,
     processed_at: null,
@@ -28,7 +29,11 @@ function makeArticle(overrides: Partial<Article> = {}): Article {
 }
 
 function okResponse(): Response {
-  return { ok: true, status: 200 } as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ result: { message_id: 123 } }),
+  } as unknown as Response;
 }
 
 function parseBody(call: unknown): Record<string, unknown> {
@@ -141,8 +146,8 @@ describe('sendArticle', () => {
       media_url: 'https://i.jpg',
       media_type: 'photo',
     });
-    const ok = await sendArticle(1, article, 'S', 'TOKEN');
-    expect(ok).toBe(true);
+    const id = await sendArticle(1, article, 'S', 'TOKEN');
+    expect(id).toBe(123);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -156,6 +161,43 @@ describe('sendArticle', () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 429 } as Response);
     const article = makeArticle();
     await expect(sendArticle(1, article, 'S', 'TOKEN')).rejects.toThrow('RATE_LIMITED');
+  });
+
+  it('sends a long summary as a full message, not a truncated caption', async () => {
+    // Long summary + photo: must not be crammed into the ~1020-char caption (which
+    // caused the mid-paragraph cut). Media goes out with a short caption, then the
+    // full summary as its own sendMessage.
+    const para = 'این یک جمله کامل فارسی است که باید تا انتها بیاید. ';
+    const longSummary = para.repeat(30); // ~1500 chars
+    fetchMock.mockResolvedValue(okResponse());
+    const article = makeArticle({
+      summary_fa: longSummary,
+      media_url: 'https://img.example.com/p.jpg',
+      media_type: 'photo',
+    });
+    await sendArticle(1, article, 'S', 'TOKEN');
+
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(urls.some((u) => u.includes('/sendPhoto'))).toBe(true);
+    const msgCall = fetchMock.mock.calls.find((c) => (c[0] as string).includes('/sendMessage'));
+    expect(msgCall).toBeDefined();
+    const text = parseBody(msgCall).text as string;
+    // The full summary shipped, and it ends on a sentence boundary — never mid-word.
+    expect(text.length).toBeGreaterThan(1020);
+    expect(text).toContain('منبع');
+  });
+
+  it('does not cut a summary mid-sentence when truncating', async () => {
+    // Force truncation by exceeding the 4096 message limit; the text before the footer
+    // must end at a sentence boundary (clean '.' or '.' + ellipsis), not a mid-word slice.
+    const sentence = 'این جمله کامل است. ';
+    const article = makeArticle({ summary_fa: sentence.repeat(300) }); // way over 4096
+    fetchMock.mockResolvedValue(okResponse());
+    await sendArticle(1, article, 'S', 'TOKEN');
+    const text = parseBody(fetchMock.mock.calls[0]).text as string;
+    expect(text.length).toBeLessThanOrEqual(4090);
+    const beforeFooter = text.split('🔗')[0].trimEnd();
+    expect(beforeFooter.endsWith('.') || beforeFooter.endsWith('...')).toBe(true);
   });
 });
 
@@ -171,16 +213,16 @@ describe('sendMessage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns true on ok', async () => {
+  it('returns the message_id on ok', async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
-    const ok = await sendMessage(1, 'hello', 'TOKEN');
-    expect(ok).toBe(true);
+    const id = await sendMessage(1, 'hello', 'TOKEN');
+    expect(id).toBe(123);
   });
 
-  it('returns false on non-429/403 error', async () => {
+  it('returns null on non-429/403 error', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 400 } as Response);
-    const ok = await sendMessage(1, 'hello', 'TOKEN');
-    expect(ok).toBe(false);
+    const id = await sendMessage(1, 'hello', 'TOKEN');
+    expect(id).toBeNull();
   });
 
   it('throws BLOCKED on 403', async () => {
@@ -191,5 +233,39 @@ describe('sendMessage', () => {
   it('throws RATE_LIMITED on 429', async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 429 } as Response);
     await expect(sendMessage(1, 'x', 'TOKEN')).rejects.toThrow('RATE_LIMITED');
+  });
+});
+
+describe('sendAudio', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46]);
+
+  it('tags performer as negent and names the file from the title', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await sendAudio(1, wav, 'My Cool Article', 'TOKEN');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain('/sendAudio');
+    const form = (init as { body: FormData }).body;
+    expect(form.get('performer')).toBe('negent');
+    expect(form.get('title')).toBe('My Cool Article');
+    const file = form.get('audio') as unknown as File;
+    expect(file.name).toBe('My Cool Article.wav');
+  });
+
+  it('sanitizes path characters out of the filename', async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    await sendAudio(1, wav, 'a/b\\c: d', 'TOKEN');
+    const file = (fetchMock.mock.calls[0][1] as { body: FormData }).body.get('audio') as unknown as File;
+    expect(file.name).toBe('a b c d.wav');
   });
 });

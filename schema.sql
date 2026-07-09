@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS articles (
   fetched_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   status          TEXT    NOT NULL DEFAULT 'raw',
   summary_fa      TEXT,
+  full_fa         TEXT,
   category        TEXT,
   relevance_score INTEGER,
   processed_at    TEXT,

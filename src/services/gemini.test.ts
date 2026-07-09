@@ -19,6 +19,7 @@ const ERR_RESPONSE = (status: number, message: string) =>
 
 const VALID_RESULT = JSON.stringify({
   summary: 'خلاصه تست',
+  full_fa: 'ترجمه کامل تست',
   category: 'ai',
   relevance_score: 4,
 });
@@ -41,8 +42,25 @@ describe('summarizeAndTranslate', () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     const out = await summarizeAndTranslate('T', 'C', 'Source', 'KEY');
     expect(out.summary).toBe('خلاصه تست');
+    expect(out.full_fa).toBe('ترجمه کامل تست');
     expect(out.category).toBe('ai');
     expect(out.relevance_score).toBe(4);
+  });
+
+  it('falls back to the summary when full_fa is absent', async () => {
+    fetchMock.mockResolvedValueOnce(
+      OK_RESPONSE(JSON.stringify({ summary: 'خلاصه', category: 'ai', relevance_score: 3 }))
+    );
+    const out = await summarizeAndTranslate('T', 'C', 'S', 'K');
+    expect(out.full_fa).toBe('خلاصه');
+  });
+
+  it('asks the model for a full translation to read aloud', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    await summarizeAndTranslate('T', 'C', 'S', 'K');
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
+    expect(prompt).toContain('full_fa');
+    expect(prompt).toContain('FULL faithful Persian translation');
   });
 
   it('sends prompt with title, content, and source in request body', async () => {
@@ -65,12 +83,12 @@ describe('summarizeAndTranslate', () => {
     expect(url).toContain('key=SECRET_KEY');
   });
 
-  it('asks for 3-6 paragraphs and no longer says "short"', async () => {
+  it('asks for a bounded 2-4 paragraph, finished summary', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'K');
     const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
-    expect(prompt).toContain('3-6 paragraphs');
-    expect(prompt).not.toContain('short paragraphs');
+    expect(prompt).toContain('2-4 paragraphs');
+    expect(prompt).toContain('ALWAYS finish the final paragraph');
   });
 
   it('instructs the model to preserve concrete facts', async () => {
@@ -80,11 +98,11 @@ describe('summarizeAndTranslate', () => {
     expect(prompt).toContain('Preserve every concrete fact');
   });
 
-  it('allows enough output tokens for six paragraphs', async () => {
+  it('allows enough output tokens to avoid mid-output truncation', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'K');
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.generationConfig.maxOutputTokens).toBe(2048);
+    expect(body.generationConfig.maxOutputTokens).toBe(8192);
   });
 
   it('retries on 503 and succeeds on second attempt', async () => {

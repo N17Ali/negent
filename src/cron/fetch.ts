@@ -5,9 +5,16 @@ import { isRelevantArticle } from '../utils/filter';
 import { MAX_ARTICLE_AGE_HOURS } from '../utils/constants';
 
 export async function fetchCron(env: Env): Promise<void> {
-  const cleanup = await cleanupOldArticles(env.DB);
-  if (cleanup.meta.changes) {
-    console.log(`fetch: cleaned up ${cleanup.meta.changes} old articles`);
+  // Cleanup is best-effort — fetching new articles is the point of this cron, so a
+  // cleanup failure must never block the inserts below (it previously did: a FK error
+  // here aborted the whole run and nothing new was ever saved).
+  try {
+    const cleanup = await cleanupOldArticles(env.DB);
+    if (cleanup.meta.changes) {
+      console.log(`fetch: cleaned up ${cleanup.meta.changes} old articles`);
+    }
+  } catch (err) {
+    console.error('fetch: cleanup failed (continuing):', err instanceof Error ? err.message : err);
   }
 
   const source = await getNextSource(env.DB);

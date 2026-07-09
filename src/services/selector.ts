@@ -16,11 +16,23 @@ export interface SelectedArticle {
   reason: string;
 }
 
+/**
+ * Selector output. `selected` is the top-N to ship now; `bucket` holds articles the
+ * selector judged genuinely important but which lost the top-N slots to more important
+ * stories. Bucket articles are kept (left `raw`) and reconsidered on the next run rather
+ * than being skipped, so a strong story isn't dropped just because a better one showed up
+ * the same batch.
+ */
+export interface SelectionResult {
+  selected: SelectedArticle[];
+  bucket: number[];
+}
+
 export async function selectTopArticles(
   candidates: ArticleCandidate[],
   recentTitles: string[],
   apiKey: string
-): Promise<SelectedArticle[]> {
+): Promise<SelectionResult> {
   try {
     return await callWithRetry(candidates, recentTitles, apiKey, GEMINI_MODEL);
   } catch (err) {
@@ -39,10 +51,10 @@ async function callWithRetry(
   recentTitles: string[],
   apiKey: string,
   model: string
-): Promise<SelectedArticle[]> {
+): Promise<SelectionResult> {
   const recentList =
     recentTitles.length > 0
-      ? `\n\nAlready delivered (do NOT select similar articles):\n${recentTitles.map((t) => `- ${t}`).join('\n')}`
+      ? `\n\nAlready delivered (do NOT select these or any article covering the same story):\n${recentTitles.map((t) => `- ${t}`).join('\n')}`
       : '';
 
   const articleList = candidates
@@ -61,7 +73,11 @@ Select ONLY articles that are:
 - **Major AI launches** — new models from OpenAI/Google/Anthropic, significant capability breakthroughs, major safety/policy changes. NOT tool updates, NOT tutorials, NOT benchmarks
 - **Critical programming news** — major framework releases (React, Docker, Kubernetes, Rust), critical zero-day CVEs, industry shifts. NOT minor library updates, NOT blog posts, NOT tips
 
-When in doubt, do NOT select. It's better to select fewer than 10 than to include unimportant ones.
+When in doubt, do NOT select. It's better to select fewer than ${SELECT_TOP_N} than to include unimportant ones.
+
+## Deduplicate (important)
+
+Several sources often cover the SAME story. Never select more than one article about the same event — pick the single best (most detailed / most authoritative) one and drop the near-duplicates, even if their titles differ.
 
 ## Articles to choose from (${candidates.length} total):
 [
@@ -69,8 +85,10 @@ ${articleList}
 ]
 ${recentList}
 
-Select up to ${SELECT_TOP_N} articles. Respond in this exact JSON format:
-{"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}]}`;
+Select up to ${SELECT_TOP_N} articles for "selected". Additionally, if there are OTHER articles that are genuinely important by the strict bar above but didn't make the top ${SELECT_TOP_N} (they lost their slot to more important stories), list just their ids in "bucket" so they can be reconsidered next time. Do NOT put unimportant articles in "bucket" — only ones you'd have selected if there were more room. Never put the same id in both lists.
+
+Respond in this exact JSON format:
+{"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}], "bucket": [789, 1011]}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const requestBody = JSON.stringify({
@@ -115,7 +133,7 @@ async function callGemini(
   url: string,
   body: string,
   candidates: ArticleCandidate[]
-): Promise<SelectedArticle[]> {
+): Promise<SelectionResult> {
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -144,7 +162,10 @@ async function callGemini(
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!content) throw new Error('Empty selector response');
 
-  const parsed = JSON.parse(stripMarkdownFences(content)) as { selected: SelectedArticle[] };
+  const parsed = JSON.parse(stripMarkdownFences(content)) as {
+    selected: SelectedArticle[];
+    bucket?: number[];
+  };
   if (!Array.isArray(parsed.selected))
     throw new Error('No selected array in selector response');
 
@@ -153,11 +174,17 @@ async function callGemini(
     .filter((s) => validIds.has(s.id))
     .slice(0, SELECT_TOP_N);
 
+  // Runner-ups: valid, not already selected, deduped. Kept raw for the next run.
+  const selectedIds = new Set(selected.map((s) => s.id));
+  const bucket = Array.isArray(parsed.bucket)
+    ? [...new Set(parsed.bucket)].filter((id) => validIds.has(id) && !selectedIds.has(id))
+    : [];
+
   console.log(
-    `selector: selected ${selected.length}/${SELECT_TOP_N} from ${candidates.length} candidates`
+    `selector: selected ${selected.length}/${SELECT_TOP_N}, bucketed ${bucket.length} for next run, from ${candidates.length} candidates`
   );
 
-  return selected;
+  return { selected, bucket };
 }
 
 function stripMarkdownFences(text: string): string {

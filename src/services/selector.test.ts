@@ -48,22 +48,51 @@ describe('selectTopArticles', () => {
       { id: 2, title: 'Pride week in games', snippet: 'opinion piece', source: 'Eurogamer' },
       { id: 3, title: 'GPT-5 launched', snippet: 'OpenAI announcement', source: 'TechCrunch' },
     ];
-    const result = await selectTopArticles(candidates, [], 'KEY');
-    expect(result).toHaveLength(2);
-    expect(result[0].id).toBe(1);
-    expect(result[0].reason).toBe('major game release');
-    expect(result[1].id).toBe(3);
+    const { selected } = await selectTopArticles(candidates, [], 'KEY');
+    expect(selected).toHaveLength(2);
+    expect(selected[0].id).toBe(1);
+    expect(selected[0].reason).toBe('major game release');
+    expect(selected[1].id).toBe(3);
   });
 
-  it('strips markdown code fences from response', async () => {
-    fetchMock.mockResolvedValueOnce(OK_RESPONSE(FENCED_SELECTION));
-    const result = await selectTopArticles(
+  it('returns important runner-ups in the bucket, excluding selected and invalid ids', async () => {
+    fetchMock.mockResolvedValueOnce(
+      OK_RESPONSE(
+        JSON.stringify({
+          selected: [{ id: 1, reason: 'top story' }],
+          bucket: [2, 1, 999], // 1 is already selected, 999 isn't a candidate
+        })
+      )
+    );
+    const candidates = [
+      { id: 1, title: 'A', snippet: '', source: 'S' },
+      { id: 2, title: 'B', snippet: '', source: 'S' },
+      { id: 3, title: 'C', snippet: '', source: 'S' },
+    ];
+    const { selected, bucket } = await selectTopArticles(candidates, [], 'KEY');
+    expect(selected.map((s) => s.id)).toEqual([1]);
+    expect(bucket).toEqual([2]);
+  });
+
+  it('returns an empty bucket when the model omits it', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
+    const { bucket } = await selectTopArticles(
       [{ id: 1, title: 'T', snippet: '', source: 'S' }],
       [],
       'KEY'
     );
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe(1);
+    expect(bucket).toEqual([]);
+  });
+
+  it('strips markdown code fences from response', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(FENCED_SELECTION));
+    const { selected } = await selectTopArticles(
+      [{ id: 1, title: 'T', snippet: '', source: 'S' }],
+      [],
+      'KEY'
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0].id).toBe(1);
   });
 
   it('sends prompt with article list to the primary Gemini model', async () => {
@@ -105,12 +134,12 @@ describe('selectTopArticles', () => {
     );
     await vi.advanceTimersByTimeAsync(3000);
     await vi.advanceTimersByTimeAsync(8000);
-    const result = await promise;
+    const { selected } = await promise;
     // 3 attempts on primary (all 429) then fallback succeeds on first gemma try
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0][0]).toContain(GEMINI_MODEL);
     expect(fetchMock.mock.calls[3][0]).toContain(GEMMA_MODEL);
-    expect(result).toHaveLength(2);
+    expect(selected).toHaveLength(2);
   });
 
   it('filters out selected ids not in candidates', async () => {
@@ -128,9 +157,9 @@ describe('selectTopArticles', () => {
       { id: 1, title: 'Valid', snippet: '', source: 'S' },
       { id: 2, title: 'Other', snippet: '', source: 'S' },
     ];
-    const result = await selectTopArticles(candidates, [], 'KEY');
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe(1);
+    const { selected } = await selectTopArticles(candidates, [], 'KEY');
+    expect(selected).toHaveLength(1);
+    expect(selected[0].id).toBe(1);
   });
 
   it('retries on 503 and succeeds on second attempt', async () => {
@@ -183,7 +212,7 @@ describe('selectTopArticles', () => {
       snippet: '',
       source: 'S',
     }));
-    const result = await selectTopArticles(candidates, [], 'KEY');
-    expect(result.length).toBeLessThanOrEqual(10);
+    const { selected } = await selectTopArticles(candidates, [], 'KEY');
+    expect(selected.length).toBeLessThanOrEqual(10);
   });
 });

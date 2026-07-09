@@ -2,7 +2,8 @@ import { Env, Article } from '../types';
 import { selectTopArticles } from '../services/selector';
 import { summarizeAndTranslate } from '../services/gemini';
 import { fetchArticleText } from '../services/extract';
-import { sendArticle } from '../services/telegram';
+import { sendArticle, sendAudio } from '../services/telegram';
+import { generateAudio } from '../services/tts';
 import {
   getRawArticlesBatch,
   getRecentDeliveredTitles,
@@ -27,6 +28,7 @@ import {
   DELIVERY_START_HOUR,
   DELIVERY_END_HOUR,
   TIMEZONE,
+  SEND_AUDIO,
 } from '../utils/constants';
 
 function isWithinDeliveryHours(): boolean {
@@ -39,10 +41,13 @@ function isWithinDeliveryHours(): boolean {
   return hour >= DELIVERY_START_HOUR && hour < DELIVERY_END_HOUR;
 }
 
-export async function selectCron(env: Env): Promise<void> {
-  if (!isWithinDeliveryHours()) {
+export async function selectCron(env: Env, force = false): Promise<void> {
+  if (!force && !isWithinDeliveryHours()) {
     console.log('select: outside delivery hours (9am-9pm Tehran), skipping');
     return;
+  }
+  if (force) {
+    console.log('select: force=true — bypassing delivery-hours gate and rate limit');
   }
 
   const { results: rawRows } = await getRawArticlesBatch(env.DB, BATCH_SELECT_SIZE);
@@ -55,7 +60,7 @@ export async function selectCron(env: Env): Promise<void> {
 
   // Delivery runs regardless of whether new raw articles were selected this run,
   // so any already-summarized backlog still ships.
-  await deliver(env);
+  await deliver(env, force);
 }
 
 async function selectAndSummarize(
@@ -66,6 +71,7 @@ async function selectAndSummarize(
   const recentTitles = recent.map((r) => r.title);
 
   let selectedIds: number[];
+  let bucketIds: number[] = [];
   try {
     const candidates = rawRows.map((r) => ({
       id: r.id,
@@ -74,18 +80,23 @@ async function selectAndSummarize(
       source: r.source_name || '',
     }));
 
-    const selected = await selectTopArticles(candidates, recentTitles, env.GEMINI_API_KEY);
+    const { selected, bucket } = await selectTopArticles(candidates, recentTitles, env.GEMINI_API_KEY);
     selectedIds = selected.map((s) => s.id);
+    bucketIds = bucket;
 
     console.log(
-      `select: selector chose ${selectedIds.length} articles: [${selectedIds.join(',')}]`
+      `select: selector chose ${selectedIds.length} articles: [${selectedIds.join(',')}], ` +
+        `bucketed ${bucketIds.length} for next run: [${bucketIds.join(',')}]`
     );
   } catch (err) {
     console.error('select: selector failed:', err instanceof Error ? err.message : err);
     return;
   }
 
-  const notSelectedIds = rawRows.map((r) => r.id).filter((id) => !selectedIds.includes(id));
+  // Skip everything the selector neither picked nor bucketed. Bucketed articles are left
+  // 'raw' so the next select run reconsiders them alongside newly-fetched candidates.
+  const keep = new Set([...selectedIds, ...bucketIds]);
+  const notSelectedIds = rawRows.map((r) => r.id).filter((id) => !keep.has(id));
   if (notSelectedIds.length) {
     await markArticlesSkipped(env.DB, notSelectedIds);
     console.log(`select: marked ${notSelectedIds.length} articles as skipped`);
@@ -139,6 +150,7 @@ async function selectAndSummarize(
         env.DB,
         article.id,
         result.summary,
+        result.full_fa,
         result.category,
         result.relevance_score
       );
@@ -153,7 +165,7 @@ async function selectAndSummarize(
   console.log(`select: summarized ${succeeded}/${selectedArticles.length} articles`);
 }
 
-async function deliver(env: Env): Promise<void> {
+async function deliver(env: Env, force = false): Promise<void> {
   const { results: subscribers } = await getActiveSubscribers(env.DB);
   if (!subscribers.length) {
     console.log('select: no active subscribers');
@@ -171,8 +183,9 @@ async function deliver(env: Env): Promise<void> {
   console.log(`select: delivering ${ordered.length} articles to ${subscribers.length} subscribers`);
 
   for (const sub of subscribers) {
-    const countResult = await getSubscriberMessageCount(env.DB, sub.chat_id);
-    const sentThisHour = countResult?.c ?? 0;
+    // force (manual /run-select) bypasses the per-hour rate limit so the bot can be
+    // exercised at night during development.
+    const sentThisHour = force ? 0 : (await getSubscriberMessageCount(env.DB, sub.chat_id))?.c ?? 0;
     let remaining = MAX_MESSAGES_PER_HOUR - sentThisHour;
     let sent = 0;
 
@@ -187,18 +200,38 @@ async function deliver(env: Env): Promise<void> {
       if (sent >= SELECT_TOP_N || remaining <= 0) break;
 
       try {
-        const ok = await sendArticle(
+        const messageId = await sendArticle(
           sub.chat_id,
           article,
           article.source_name || '',
           env.BOT_TOKEN
         );
+        const ok = messageId != null;
         await logDelivery(env.DB, article.id, sub.chat_id, ok);
         if (ok) {
           sent++;
           remaining--;
           await markDelivered(env.DB, article.id);
           console.log(`select: article ${article.id} [${article.category}] → ${sub.chat_id} OK`);
+          // Best-effort voice reading of the FULL translation (falls back to the summary
+          // when full_fa is absent). Audio is a bonus channel — a Live API/quota failure
+          // here must never affect the text delivery already counted above.
+          const voiceText = article.full_fa || article.summary_fa;
+          if (SEND_AUDIO && voiceText) {
+            try {
+              const wav = await generateAudio(voiceText, article.title, env.GEMINI_API_KEY);
+              if (wav) {
+                await sendAudio(sub.chat_id, wav, article.title, env.BOT_TOKEN);
+                console.log(`select: article ${article.id} audio → ${sub.chat_id} OK`);
+              } else {
+                console.warn(`select: article ${article.id} audio skipped (no audio generated)`);
+              }
+            } catch (audioErr) {
+              console.error(
+                `select: article ${article.id} audio failed: ${audioErr instanceof Error ? audioErr.message : audioErr}`
+              );
+            }
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown';
