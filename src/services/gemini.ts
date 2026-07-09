@@ -147,7 +147,7 @@ async function callGemini(url: string, body: string): Promise<GeminiResult> {
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Empty Gemini response');
 
-  const parsed: GeminiResult = JSON.parse(text);
+  const parsed: GeminiResult = JSON.parse(extractJsonObject(text));
   if (!parsed.summary) throw new Error('No summary in Gemini response');
   if (!parsed.category) throw new Error('No category in Gemini response');
   if (typeof parsed.relevance_score !== 'number')
@@ -162,4 +162,38 @@ async function callGemini(url: string, body: string): Promise<GeminiResult> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Pull the first balanced top-level JSON object out of a model response. Gemini with
+ * responseMimeType 'application/json' *usually* returns clean JSON, but occasionally wraps
+ * it in ```json fences or appends stray text after the closing brace — which made a raw
+ * JSON.parse throw "Unexpected non-whitespace character after JSON" and drop the article.
+ * Scanning brace depth (while ignoring braces inside strings) returns just the object.
+ */
+function extractJsonObject(text: string): string {
+  const start = text.indexOf('{');
+  if (start === -1) return text.trim();
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  // Unbalanced (e.g. truncated at maxOutputTokens): return from the first brace and let
+  // JSON.parse surface the error, same as before.
+  return text.slice(start).trim();
 }
