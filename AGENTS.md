@@ -21,7 +21,7 @@ Tests: `npm test` (Vitest, run once) or `npm run test:watch`. Tests live next to
 curl 'http://localhost:8787/__scheduled?cron=*/20+*+*+*+*'
 ```
 
-Selection and delivery are separate endpoints. `/run-select` runs selection → summarization (produces `done` articles); `/run-deliver` ships **one** ready article (text + voice). Both are token-gated and **fire-and-forget** — they kick the work off via `ctx.waitUntil` and return immediately (`... started — watch logs`), so a browser/curl disconnect can't cancel a slow in-flight run (voice synthesis alone can take ~a minute). Watch `npm run tail` for the outcome. `?force=1` bypasses the delivery-hours gate (and, for deliver, the per-subscriber rate limit) so the bot can be exercised at night:
+Selection and delivery are separate endpoints. `/run-select` runs selection → summarization (produces `done` articles); `/run-deliver` ships **one** ready article (text, then voice reply). Both are token-gated and **awaited inline** — `ctx.waitUntil` was tried and rejected because its work is capped to a small window after the response, which truncated the slow summarize/voice passes (`waitUntil() ... cancelled`). Awaiting keeps the whole invocation alive, but a client disconnect cancels it — so **test with `curl`** (stays connected), not a browser tab that may give up. Delivery sends text before the slow audio pass, so even a mid-run cancel can't lose the summary. `?force=1` bypasses the delivery-hours gate (and, for deliver, the per-subscriber rate limit) so the bot can be exercised at night:
 ```
 curl 'http://localhost:8787/run-select/<BOT_TOKEN>?force=1'
 curl 'http://localhost:8787/run-deliver/<BOT_TOKEN>?force=1'   # hit repeatedly to drain the backlog
@@ -38,7 +38,7 @@ Without `force`, both honor delivery hours (and deliver honors the rate limit), 
 
 Entry `src/index.ts` exports `default { fetch, scheduled }`:
 - `fetch` — handles POST `/webhook/<BOT_TOKEN>` (Telegram updates) and `/health`.
-- `scheduled` — dispatches to one of 2 cron handlers by **exact string match** of `event.cron`.
+- `scheduled` — dispatches to one of 3 cron handlers by **exact string match** of `event.cron`, and **`await`s** the handler (not `ctx.waitUntil`, whose post-response window is too small to hold a ~minute voice pass — it was cancelling delivery mid-generation).
 
 ### Cron dispatch coupling (silent failure risk)
 
