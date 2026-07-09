@@ -28,8 +28,11 @@ import { base64ToBytes, concatBytes, pcmToWav } from '../utils/audio';
 
 const WS_URL =
   'https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-const CONNECT_TIMEOUT_MS = 15000;
-const GENERATION_TIMEOUT_MS = 60000;
+// Tight per-chunk timeouts: a scheduled Worker has a bounded run duration, so a single
+// stalled Live API turn must not sit for a minute. These bound one chunk; the whole voice
+// pass is additionally capped by AUDIO_PASS_BUDGET_MS in select.ts.
+const CONNECT_TIMEOUT_MS = 10000;
+const GENERATION_TIMEOUT_MS = 30000;
 
 // Persian, informal reading + delivery guidance and pronunciation guidance so the TTS
 // says abbreviations and English tech terms correctly instead of spelling them out or

@@ -36,6 +36,14 @@ export const AUDIO_CHUNK_CHARS = 1500; // ~500 tokens of Persian per chunk. Each
 // generations can't drift/turn robotic. chunkText only ever breaks on paragraph or
 // sentence boundaries, so a chunk never ends mid-statement.
 
+// Wall-clock ceiling for the whole voice pass within one select run. TTS over the Live
+// API WebSocket is the slowest work in the cron and a scheduled Worker has a bounded
+// duration (overrunning it kills the invocation — see the `exceededCpu` outcome in tail).
+// Text is already delivered before this pass starts, so when the budget is hit we simply
+// stop voicing the remaining articles and log what was skipped rather than risk the
+// invocation being terminated mid-send.
+export const AUDIO_PASS_BUDGET_MS = 20000;
+
 export const RELEVANT_KEYWORDS: Record<string, string[]> = {
   ai: [
     'ai', 'artificial intelligence', 'llm', 'gpt', 'chatgpt', 'openai',

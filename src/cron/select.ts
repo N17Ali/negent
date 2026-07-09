@@ -29,6 +29,7 @@ import {
   DELIVERY_END_HOUR,
   TIMEZONE,
   SEND_AUDIO,
+  AUDIO_PASS_BUDGET_MS,
 } from '../utils/constants';
 
 function isWithinDeliveryHours(): boolean {
@@ -182,6 +183,16 @@ async function deliver(env: Env, force = false): Promise<void> {
 
   console.log(`select: delivering ${ordered.length} articles to ${subscribers.length} subscribers`);
 
+  // Pass 1 delivers all TEXT; pass 2 voices the articles. Audio is the slowest work in the
+  // run (Live API over WebSocket) and the invocation has a bounded duration, so we finish
+  // every text send first — a slow or killed audio pass can then never delay or drop text.
+  // Per article we record which subscribers received the text, so the audio pass can
+  // synthesize the reading ONCE and fan the same WAV out to all of them.
+  const audioRecipients = new Map<
+    number,
+    { article: Article & { source_name: string }; chatIds: number[] }
+  >();
+
   for (const sub of subscribers) {
     // force (manual /run-select) bypasses the per-hour rate limit so the bot can be
     // exercised at night during development.
@@ -213,24 +224,16 @@ async function deliver(env: Env, force = false): Promise<void> {
           remaining--;
           await markDelivered(env.DB, article.id);
           console.log(`select: article ${article.id} [${article.category}] → ${sub.chat_id} OK`);
-          // Best-effort voice reading of the FULL translation (falls back to the summary
-          // when full_fa is absent). Audio is a bonus channel — a Live API/quota failure
-          // here must never affect the text delivery already counted above.
+          // Queue this subscriber for the article's voice reading (full_fa, falling back to
+          // the summary). Generated once per article in pass 2, never inline here.
           const voiceText = article.full_fa || article.summary_fa;
           if (SEND_AUDIO && voiceText) {
-            try {
-              const wav = await generateAudio(voiceText, article.title, env.GEMINI_API_KEY);
-              if (wav) {
-                await sendAudio(sub.chat_id, wav, article.title, env.BOT_TOKEN);
-                console.log(`select: article ${article.id} audio → ${sub.chat_id} OK`);
-              } else {
-                console.warn(`select: article ${article.id} audio skipped (no audio generated)`);
-              }
-            } catch (audioErr) {
-              console.error(
-                `select: article ${article.id} audio failed: ${audioErr instanceof Error ? audioErr.message : audioErr}`
-              );
+            let entry = audioRecipients.get(article.id);
+            if (!entry) {
+              entry = { article, chatIds: [] };
+              audioRecipients.set(article.id, entry);
             }
+            entry.chatIds.push(sub.chat_id);
           }
         }
       } catch (err) {
@@ -252,6 +255,70 @@ async function deliver(env: Env, force = false): Promise<void> {
 
     console.log(`select: sent ${sent} articles to ${sub.chat_id}`);
   }
+
+  if (SEND_AUDIO && audioRecipients.size) {
+    await deliverAudio(env, audioRecipients);
+  }
+}
+
+/**
+ * Voice each delivered article once and fan the WAV out to every subscriber who received
+ * the text. Best-effort: generation/send failures are logged, never thrown — text is
+ * already delivered by the time this runs. Bounded by AUDIO_PASS_BUDGET_MS so a slow Live
+ * API session can't push the scheduled invocation past its duration limit; when the budget
+ * is hit we stop voicing further articles and log which ones were skipped.
+ */
+async function deliverAudio(
+  env: Env,
+  audioRecipients: Map<number, { article: Article & { source_name: string }; chatIds: number[] }>
+): Promise<void> {
+  const start = Date.now();
+  let voiced = 0;
+  const skipped: number[] = [];
+
+  for (const { article, chatIds } of audioRecipients.values()) {
+    if (Date.now() - start > AUDIO_PASS_BUDGET_MS) {
+      skipped.push(article.id);
+      continue;
+    }
+
+    const voiceText = article.full_fa || article.summary_fa;
+    if (!voiceText) continue;
+
+    let wav: Uint8Array | null = null;
+    try {
+      wav = await generateAudio(voiceText, article.title, env.GEMINI_API_KEY);
+    } catch (err) {
+      console.error(
+        `select: article ${article.id} audio generation failed: ${err instanceof Error ? err.message : err}`
+      );
+      continue;
+    }
+    if (!wav) {
+      console.warn(`select: article ${article.id} audio skipped (no audio generated)`);
+      continue;
+    }
+
+    for (const chatId of chatIds) {
+      try {
+        await sendAudio(chatId, wav, article.title, env.BOT_TOKEN);
+        console.log(`select: article ${article.id} audio → ${chatId} OK`);
+      } catch (audioErr) {
+        console.error(
+          `select: article ${article.id} audio → ${chatId} failed: ${audioErr instanceof Error ? audioErr.message : audioErr}`
+        );
+      }
+    }
+    voiced++;
+  }
+
+  if (skipped.length) {
+    console.warn(
+      `select: audio pass hit ${AUDIO_PASS_BUDGET_MS}ms budget, skipped voice for ` +
+        `${skipped.length} article(s): [${skipped.join(',')}]`
+    );
+  }
+  console.log(`select: voiced ${voiced}/${audioRecipients.size} articles`);
 }
 
 function rotateCategories(
