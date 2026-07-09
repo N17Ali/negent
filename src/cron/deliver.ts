@@ -19,8 +19,14 @@ import { isWithinDeliveryHours } from '../utils/time';
  * never has to share a run with fetch or with another article's audio, which is what kept
  * tripping the `exceededCpu` invocation limit before.
  *
- * The voice is generated FIRST, then the text and the voice are sent back-to-back so they
- * arrive together, with the audio quoting (replying to) the text message.
+ * The TEXT is sent FIRST (and the article marked delivered), then the voice is generated and
+ * sent as a reply that quotes each subscriber's text message. Ordering matters: a full voice
+ * pass can take ~a minute and the Live API sometimes stalls a turn, and a single Worker
+ * invocation cannot hold that long — awaiting it inline gets `canceled` on client disconnect,
+ * and deferring it past response end gets the `waitUntil() ... cancelled` time-limit. Either
+ * way the audio can die; sending text first guarantees the summary always ships and the
+ * article is never silently lost to a slow/stalled synthesis. The voice is pure best-effort
+ * and arrives a few seconds later, threaded under the text.
  *
  * Rate limit: a subscriber still receives at most MAX_MESSAGES_PER_HOUR (3) articles in any
  * rolling hour — enforced here per tick via the delivery_log count, so the more frequent
@@ -59,20 +65,10 @@ export async function deliverCron(env: Env, force = false): Promise<boolean> {
 
   console.log(`deliver: article ${article.id} "${article.title}" → ${eligible.length} subscriber(s)`);
 
-  // Generate the voice ONCE, before any text goes out, so text + voice arrive together.
-  let wav: Uint8Array | null = null;
-  const voiceText = article.full_fa || article.summary_fa;
-  if (SEND_AUDIO && voiceText) {
-    try {
-      wav = await generateAudio(voiceText, article.title, env.GEMINI_API_KEY);
-      if (!wav) console.warn(`deliver: article ${article.id} produced no audio`);
-    } catch (err) {
-      console.error(
-        `deliver: article ${article.id} audio generation failed: ${err instanceof Error ? err.message : err}`
-      );
-    }
-  }
-
+  // Pass 1: send the TEXT to every eligible subscriber and remember each one's message id so
+  // the voice can quote it. Text is fast and reliable; do it before touching the slow voice
+  // path so the summary always ships even if audio later stalls or gets time-limited.
+  const textSent: { chatId: number; messageId: number }[] = [];
   let anyDelivered = false;
   for (const sub of eligible) {
     try {
@@ -81,19 +77,8 @@ export async function deliverCron(env: Env, force = false): Promise<boolean> {
       await logDelivery(env.DB, article.id, sub.chat_id, ok);
       if (!ok) continue;
       anyDelivered = true;
+      textSent.push({ chatId: sub.chat_id, messageId: messageId as number });
       console.log(`deliver: article ${article.id} [${article.category}] → ${sub.chat_id} OK`);
-
-      // Voice reading, quoting the text message. Best-effort — the text is already sent.
-      if (wav) {
-        try {
-          await sendAudio(sub.chat_id, wav, article.title, env.BOT_TOKEN, messageId);
-          console.log(`deliver: article ${article.id} audio → ${sub.chat_id} OK`);
-        } catch (audioErr) {
-          console.error(
-            `deliver: article ${article.id} audio → ${sub.chat_id} failed: ${audioErr instanceof Error ? audioErr.message : audioErr}`
-          );
-        }
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown';
       if (msg === 'BLOCKED') {
@@ -110,10 +95,40 @@ export async function deliverCron(env: Env, force = false): Promise<boolean> {
     }
   }
 
-  // Mark delivered once it has reached at least one subscriber (matches the prior
-  // any-subscriber semantics), so the next tick advances to the following article.
+  // Mark delivered as soon as the text has reached at least one subscriber (matches the prior
+  // any-subscriber semantics), so the article is locked in before the risky voice pass and the
+  // next tick advances even if audio synthesis dies below.
   if (anyDelivered) {
     await markDelivered(env.DB, article.id);
   }
+
+  // Pass 2: best-effort voice. Generate ONCE, then send it as a reply that quotes each
+  // subscriber's text message. If this stalls or the invocation is time-limited, the text is
+  // already delivered — the reader simply misses the audio for this one article.
+  const voiceText = article.full_fa || article.summary_fa;
+  if (textSent.length && SEND_AUDIO && voiceText) {
+    let wav: Uint8Array | null = null;
+    try {
+      wav = await generateAudio(voiceText, article.title, env.GEMINI_API_KEY);
+      if (!wav) console.warn(`deliver: article ${article.id} produced no audio`);
+    } catch (err) {
+      console.error(
+        `deliver: article ${article.id} audio generation failed: ${err instanceof Error ? err.message : err}`
+      );
+    }
+    if (wav) {
+      for (const { chatId, messageId } of textSent) {
+        try {
+          await sendAudio(chatId, wav, article.title, env.BOT_TOKEN, messageId);
+          console.log(`deliver: article ${article.id} audio → ${chatId} OK`);
+        } catch (audioErr) {
+          console.error(
+            `deliver: article ${article.id} audio → ${chatId} failed: ${audioErr instanceof Error ? audioErr.message : audioErr}`
+          );
+        }
+      }
+    }
+  }
+
   return anyDelivered;
 }
