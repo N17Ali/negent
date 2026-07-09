@@ -21,7 +21,7 @@ Tests: `npm test` (Vitest, run once) or `npm run test:watch`. Tests live next to
 curl 'http://localhost:8787/__scheduled?cron=*/20+*+*+*+*'
 ```
 
-Selection and delivery are separate endpoints. `/run-select` runs selection → summarization (produces `done` articles); `/run-deliver` ships **one** ready article (text + voice). Both are token-gated; `?force=1` bypasses the delivery-hours gate (and, for deliver, the per-subscriber rate limit) so the bot can be exercised at night:
+Selection and delivery are separate endpoints. `/run-select` runs selection → summarization (produces `done` articles); `/run-deliver` ships **one** ready article (text + voice). Both are token-gated and **fire-and-forget** — they kick the work off via `ctx.waitUntil` and return immediately (`... started — watch logs`), so a browser/curl disconnect can't cancel a slow in-flight run (voice synthesis alone can take ~a minute). Watch `npm run tail` for the outcome. `?force=1` bypasses the delivery-hours gate (and, for deliver, the per-subscriber rate limit) so the bot can be exercised at night:
 ```
 curl 'http://localhost:8787/run-select/<BOT_TOKEN>?force=1'
 curl 'http://localhost:8787/run-deliver/<BOT_TOKEN>?force=1'   # hit repeatedly to drain the backlog

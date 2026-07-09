@@ -25,31 +25,36 @@ export default {
     // Manual trigger for the select cron (selection → summarize). Token in path gates
     // access. `?force=1` bypasses the delivery-hours gate so selection can be tested at
     // night. Delivery is a separate endpoint (/run-deliver) now.
-    // Await the pipeline inline (rather than ctx.waitUntil) so the invocation stays alive
-    // for its full duration.
+    //
+    // Kicked off via ctx.waitUntil (fire-and-forget) rather than awaited inline: selection +
+    // summarization is slow, and if the client disconnects while we await, the runtime
+    // cancels the whole invocation mid-pipeline. waitUntil keeps it running server-side
+    // independent of the client — watch `npm run tail` for the outcome.
     if (url.pathname === `/run-select/${env.BOT_TOKEN}`) {
       const force = ['1', 'true', 'yes'].includes((url.searchParams.get('force') || '').toLowerCase());
-      try {
-        await selectCron(env, force);
-      } catch (err) {
-        console.error('run-select error:', err instanceof Error ? err.message : err);
-        return new Response('select failed', { status: 500 });
-      }
-      return new Response(force ? 'select done (force)' : 'select done');
+      ctx.waitUntil(
+        selectCron(env, force).catch((err) =>
+          console.error('run-select error:', err instanceof Error ? err.message : err)
+        )
+      );
+      return new Response(force ? 'select started (force) — watch logs' : 'select started — watch logs');
     }
 
     // Manual trigger for the deliver cron — ships ONE ready article (text + voice). Hit it
     // repeatedly to drain the backlog. `?force=1` bypasses the delivery-hours gate and the
     // per-subscriber rate limit so the bot can be exercised at night during development.
+    //
+    // Fire-and-forget via ctx.waitUntil for the same reason: voice-first delivery generates
+    // the whole WAV before sending, which can take a minute; awaiting it inline meant a
+    // browser giving up would cancel the invocation before the text/voice ever went out.
     if (url.pathname === `/run-deliver/${env.BOT_TOKEN}`) {
       const force = ['1', 'true', 'yes'].includes((url.searchParams.get('force') || '').toLowerCase());
-      try {
-        const sent = await deliverCron(env, force);
-        return new Response(sent ? 'delivered one' : 'nothing to deliver');
-      } catch (err) {
-        console.error('run-deliver error:', err instanceof Error ? err.message : err);
-        return new Response('deliver failed', { status: 500 });
-      }
+      ctx.waitUntil(
+        deliverCron(env, force)
+          .then((sent) => console.log(`run-deliver: ${sent ? 'delivered one' : 'nothing to deliver'}`))
+          .catch((err) => console.error('run-deliver error:', err instanceof Error ? err.message : err))
+      );
+      return new Response('deliver started — watch logs');
     }
 
     return new Response('Not Found', { status: 404 });

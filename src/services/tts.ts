@@ -70,13 +70,20 @@ export async function generateAudio(
   console.log(`tts: generating audio for ${trimmed.length} chars in ${chunks.length} chunk(s)`);
 
   for (let i = 0; i < chunks.length; i++) {
-    const pcm = await synthesizeChunk(chunks[i], apiKey);
+    let pcm = await synthesizeChunk(chunks[i], apiKey);
+    if (!pcm) {
+      // The Live API occasionally stalls a single turn (generation timeout) even though the
+      // surrounding chunks stream fine. A dropped middle chunk leaves an audible gap, so give
+      // it one more try on a fresh session before accepting the hole.
+      console.warn(`tts: chunk ${i + 1}/${chunks.length} produced no audio, retrying once`);
+      pcm = await synthesizeChunk(chunks[i], apiKey);
+    }
     if (pcm) {
       pcmParts.push(pcm);
       console.log(`tts: chunk ${i + 1}/${chunks.length} ok (${pcm.length} PCM bytes)`);
     } else {
-      console.warn(`tts: chunk ${i + 1}/${chunks.length} produced no audio`);
-      // First chunk failing (likely auth/model error) → give up; a later chunk failing
+      console.warn(`tts: chunk ${i + 1}/${chunks.length} produced no audio after retry`);
+      // First chunk failing twice (likely auth/model error) → give up; a later chunk failing
       // still yields a partial-but-usable reading of what we have.
       if (i === 0) return null;
     }
