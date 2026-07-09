@@ -68,7 +68,10 @@ async function selectAndSummarize(
   env: Env,
   rawRows: { id: number; title: string; content_snippet: string | null; source_name: string | null }[]
 ): Promise<void> {
-  const { results: recent } = await getRecentDeliveredTitles(env.DB, 30);
+  // Wider recent-delivered window than a single run so a story delivered earlier in the
+  // day still guards against a same-story near-duplicate showing up hours later (the
+  // selector has no memory of past runs — this list is its only cross-run dedup signal).
+  const { results: recent } = await getRecentDeliveredTitles(env.DB, 50);
   const recentTitles = recent.map((r) => r.title);
 
   let selectedIds: number[];

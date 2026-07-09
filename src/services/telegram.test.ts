@@ -91,12 +91,12 @@ describe('sendArticle', () => {
     expect(body.text as string).not.toContain('Some English Title');
   });
 
-  it('includes category icon at start', async () => {
+  it('does not prepend a category emoji', async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
     const article = makeArticle({ category: 'ai' });
     await sendArticle(1, article, 'S', 'TOKEN');
     const body = parseBody(fetchMock.mock.calls[0]);
-    expect(body.text as string).toMatch(/^🤖/);
+    expect(body.text as string).not.toMatch(/^[‏\s]*[🤖💻🎮📰]/);
   });
 
   it('includes source link footer', async () => {

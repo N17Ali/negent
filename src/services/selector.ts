@@ -64,20 +64,20 @@ async function callWithRetry(
     )
     .join(',\n');
 
-  const prompt = `You are a tech news curator. Select the ${SELECT_TOP_N} most important articles from the list below.
+  const prompt = `You are a tech news curator. Select the ${SELECT_TOP_N} most interesting articles from the list below.
 
-## What qualifies as important (BE EXTREMELY STRICT)
+## What qualifies as important
 
-Select ONLY articles that are:
-- **AAA games** from major studios (Rockstar, CD Projekt, FromSoftware, Naughty Dog, Bethesda, Blizzard, etc.) — major releases, delays, or announcements. NOT indie games, NOT opinion pieces, NOT pride week articles, NOT interviews
-- **Major AI launches** — new models from OpenAI/Google/Anthropic, significant capability breakthroughs, major safety/policy changes. NOT tool updates, NOT tutorials, NOT benchmarks
-- **Critical programming news** — major framework releases (React, Docker, Kubernetes, Rust), critical zero-day CVEs, industry shifts. NOT minor library updates, NOT blog posts, NOT tips
+Prefer concrete news that matters to a tech-savvy audience:
+- **Games** — notable releases, delays, or announcements (major studios especially, but strong indie news counts too).
+- **AI** — new models, notable capability advances, significant product/API launches, or policy/safety changes.
+- **Programming** — framework or tool releases, notable version launches, security issues (CVEs), or meaningful industry shifts.
 
-When in doubt, do NOT select. It's better to select fewer than ${SELECT_TOP_N} than to include unimportant ones.
+Favor real news over pure opinion pieces, tutorials, and how-to tips. Aim to fill all ${SELECT_TOP_N} slots when there are enough reasonable candidates; only pick fewer if there genuinely aren't ${SELECT_TOP_N} worthwhile stories.
 
 ## Deduplicate (important)
 
-Several sources often cover the SAME story. Never select more than one article about the same event — pick the single best (most detailed / most authoritative) one and drop the near-duplicates, even if their titles differ.
+Several sources often cover the SAME story. Never select more than one article about the same event — pick the single best (most detailed / most authoritative) one and drop the near-duplicates, even if their titles are worded differently.
 
 ## Articles to choose from (${candidates.length} total):
 [
@@ -85,7 +85,7 @@ ${articleList}
 ]
 ${recentList}
 
-Select up to ${SELECT_TOP_N} articles for "selected". Additionally, if there are OTHER articles that are genuinely important by the strict bar above but didn't make the top ${SELECT_TOP_N} (they lost their slot to more important stories), list just their ids in "bucket" so they can be reconsidered next time. Do NOT put unimportant articles in "bucket" — only ones you'd have selected if there were more room. Never put the same id in both lists.
+Select up to ${SELECT_TOP_N} articles for "selected". Additionally, if there are OTHER articles that are genuinely worthwhile by the bar above but didn't make the top ${SELECT_TOP_N} (they lost their slot to more important stories), list just their ids in "bucket" so they can be reconsidered next time. Do NOT put weak articles in "bucket" — only ones you'd have selected if there were more room. Never put the same id in both lists.
 
 Respond in this exact JSON format:
 {"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}], "bucket": [789, 1011]}`;
@@ -94,7 +94,7 @@ Respond in this exact JSON format:
   const requestBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 1,
+      temperature: 0.2,
       maxOutputTokens: 16384,
       responseMimeType: 'application/json',
     },

@@ -105,7 +105,7 @@ describe('selectTopArticles', () => {
     const body = JSON.parse(init.body);
     expect(body.contents[0].parts[0].text).toContain('GTA 6');
     expect(body.generationConfig.responseMimeType).toBe('application/json');
-    expect(body.generationConfig.temperature).toBe(1);
+    expect(body.generationConfig.temperature).toBe(0.2);
   });
 
   it('includes recent delivered titles in prompt for dedup', async () => {

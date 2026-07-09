@@ -9,7 +9,6 @@ export async function sendArticle(
   sourceName: string,
   botToken: string
 ): Promise<number | null> {
-  const catIcon = categoryIcon(article.category);
   const footer = formatFooter(article, sourceName);
   const summary = formatSummary(article.summary_fa || '');
 
@@ -21,7 +20,7 @@ export async function sendArticle(
     // it as the caption (one message). If it doesn't, DON'T truncate it into the caption
     // (that's what cut the Persian summaries mid-paragraph) — attach the media with a
     // short caption and send the full summary as its own message below.
-    const caption = `${catIcon}\n\n${summary}${footer}`;
+    const caption = `${summary}${footer}`;
     if (caption.length <= MAX_CAPTION_LENGTH) {
       const id =
         article.media_type === 'photo'
@@ -30,7 +29,7 @@ export async function sendArticle(
       if (id !== null) return id;
       // media failed (e.g. dead image URL) → fall through to a plain text message
     } else {
-      const shortCaption = `${catIcon}${footer}`;
+      const shortCaption = footer.trimStart();
       if (article.media_type === 'photo') {
         await sendPhoto(chatId, article.media_url!, shortCaption, botToken);
       } else {
@@ -38,7 +37,7 @@ export async function sendArticle(
       }
       // The summary is the point — send it in full regardless of whether media attached.
       // Return this text message's id: it's the one worth quoting with the voice reading.
-      const body = `${catIcon}\n\n${summary}${footer}`;
+      const body = `${summary}${footer}`;
       return sendMessage(chatId, truncate(body, MAX_MESSAGE_LENGTH), botToken);
     }
   }
@@ -91,12 +90,11 @@ function formatFooter(article: Article, sourceName: string): string {
 }
 
 function formatMessage(article: Article, sourceName: string): string {
-  const catIcon = categoryIcon(article.category);
   const footer = formatFooter(article, sourceName);
   const summary = formatSummary(article.summary_fa || '');
-  const available = Math.max(0, MAX_MESSAGE_LENGTH - footer.length - catIcon.length - 4);
+  const available = Math.max(0, MAX_MESSAGE_LENGTH - footer.length - 4);
   const truncated = truncate(summary, available);
-  return `${catIcon}\n\n${truncated}${footer}`;
+  return `${truncated}${footer}`;
 }
 
 function formatSummary(summary: string): string {
@@ -239,15 +237,3 @@ function truncate(text: string, maxLen: number): string {
   return window.slice(0, cut).trimEnd() + '...';
 }
 
-function categoryIcon(category: string | null): string {
-  switch (category) {
-    case 'ai':
-      return '🤖';
-    case 'programming':
-      return '💻';
-    case 'gaming':
-      return '🎮';
-    default:
-      return '📰';
-  }
-}
