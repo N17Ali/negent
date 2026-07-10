@@ -2,11 +2,8 @@ export const MAX_CONTENT_LENGTH = 2000;
 export const MAX_ARTICLE_TEXT_LENGTH = 8000;
 export const MAX_CAPTION_LENGTH = 1020;
 export const MAX_MESSAGE_LENGTH = 4090;
-export const MAX_RETRY_COUNT = 3;
-export const PROCESSING_TIMEOUT_MINUTES = 10;
 export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
 export const GEMMA_MODEL = 'gemma-4-31b-it';
-export const PROCESS_BATCH_SIZE = 5;
 
 export const BATCH_SELECT_SIZE = 150;
 export const SELECT_TOP_N = 3;
@@ -18,8 +15,9 @@ export const MAX_ARTICLE_AGE_HOURS = 24;
 export const DELIVERY_START_HOUR = 9;
 export const DELIVERY_END_HOUR = 21;
 export const MAX_MESSAGES_PER_HOUR = 3;
-export const MAX_SAME_CATEGORY_IN_ROW = 3;
 export const TIMEZONE = 'Asia/Tehran';
+
+export const RECENT_DELIVERED_TITLES = 50;
 
 // Voice-audio delivery: read the full Persian summary aloud via the Gemini Live API
 // (native-audio model, WebSocket-only). Audio is best-effort — text always ships even

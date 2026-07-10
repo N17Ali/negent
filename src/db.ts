@@ -1,4 +1,5 @@
 import { Source, Article, Subscriber } from './types';
+import { MIN_RELEVANCE_SCORE, MAX_ARTICLE_AGE_HOURS } from './utils/constants';
 
 export function getNextSource(db: D1Database) {
   return db
@@ -14,27 +15,6 @@ export function advanceSourceOrder(db: D1Database, sourceId: number) {
        WHERE id = ?`
     )
     .bind(sourceId)
-    .run();
-}
-
-export function insertArticle(
-  db: D1Database,
-  sourceId: number,
-  urlHash: string,
-  url: string,
-  title: string,
-  contentSnippet: string | null,
-  mediaUrl: string | null,
-  mediaType: string | null,
-  publishedAt: string | null
-) {
-  return db
-    .prepare(
-      `INSERT OR IGNORE INTO articles
-       (source_id, url_hash, url, title, content_snippet, media_url, media_type, published_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(sourceId, urlHash, url, title, contentSnippet, mediaUrl, mediaType, publishedAt)
     .run();
 }
 
@@ -75,36 +55,13 @@ export function batchInsertArticles(
   return db.batch(stmts);
 }
 
-export function unstickProcessing(db: D1Database) {
-  return db
-    .prepare(
-      `UPDATE articles SET status = 'failed', retry_count = retry_count + 1
-       WHERE status = 'processing'
-       AND processed_at < datetime('now', '-10 minutes')`
-    )
-    .run();
-}
-
-export function getNextRawArticle(db: D1Database) {
-  return db
-    .prepare(
-      `SELECT a.*, s.name as source_name FROM articles a
-       LEFT JOIN sources s ON a.source_id = s.id
-       WHERE (a.status = 'raw' OR (a.status = 'failed' AND a.retry_count < 3))
-       AND a.fetched_at > datetime('now', '-24 hours')
-       ORDER BY CASE a.status WHEN 'raw' THEN 0 ELSE 1 END, a.fetched_at ASC
-       LIMIT 1`
-    )
-    .first<Article & { source_name: string | null }>();
-}
-
 export function getRawArticlesBatch(db: D1Database, limit: number) {
   return db
     .prepare(
       `SELECT a.id, a.title, a.content_snippet, s.name as source_name FROM articles a
        LEFT JOIN sources s ON a.source_id = s.id
        WHERE a.status = 'raw'
-       AND a.fetched_at > datetime('now', '-24 hours')
+       AND a.fetched_at > datetime('now', '-${MAX_ARTICLE_AGE_HOURS} hours')
        ORDER BY a.fetched_at DESC
        LIMIT ?`
     )
@@ -126,9 +83,9 @@ function updateStatusByIds(db: D1Database, ids: number[], status: string) {
   const statements = chunk(ids, D1_MAX_VARS).map((group) =>
     db
       .prepare(
-        `UPDATE articles SET status = '${status}' WHERE id IN (${group.map(() => '?').join(',')})`
+        `UPDATE articles SET status = ? WHERE id IN (${group.map(() => '?').join(',')})`
       )
-      .bind(...group)
+      .bind(status, ...group)
   );
   return db.batch(statements);
 }
@@ -156,7 +113,7 @@ export function lockArticle(db: D1Database, articleId: number) {
   return db
     .prepare(
       `UPDATE articles SET status = 'processing', processed_at = datetime('now')
-       WHERE id = ? AND status IN ('raw', 'selected', 'failed')`
+       WHERE id = ? AND status = 'selected'`
     )
     .bind(articleId)
     .run();
@@ -194,11 +151,11 @@ export function getUndeliveredArticles(db: D1Database, limit: number) {
     .prepare(
       `SELECT a.*, s.name as source_name FROM articles a
        JOIN sources s ON a.source_id = s.id
-       WHERE a.status = 'done' AND a.delivered = 0 AND a.relevance_score >= 4
+       WHERE a.status = 'done' AND a.delivered = 0 AND a.relevance_score >= ?
        ORDER BY a.processed_at DESC
        LIMIT ?`
     )
-    .bind(limit)
+    .bind(MIN_RELEVANCE_SCORE, limit)
     .all<Article & { source_name: string }>();
 }
 
@@ -222,16 +179,6 @@ export function markDelivered(db: D1Database, articleId: number) {
     .run();
 }
 
-export function markMultipleDelivered(db: D1Database, articleIds: number[]) {
-  if (!articleIds.length) return Promise.resolve();
-  const stmts = articleIds.map((id) =>
-    db
-      .prepare(`UPDATE articles SET delivered = 1, delivered_at = datetime('now') WHERE id = ?`)
-      .bind(id)
-  );
-  return db.batch(stmts);
-}
-
 export function logDelivery(
   db: D1Database,
   articleId: number,
@@ -253,15 +200,6 @@ export function getActiveSubscribers(db: D1Database) {
     .all<Subscriber>();
 }
 
-export function getDeliveredChatIds(db: D1Database, articleId: number) {
-  return db
-    .prepare(
-      'SELECT chat_id FROM delivery_log WHERE article_id = ? AND success = 1'
-    )
-    .bind(articleId)
-    .all<{ chat_id: number }>();
-}
-
 export function getSubscriberMessageCount(db: D1Database, chatId: number) {
   return db
     .prepare(
@@ -271,17 +209,6 @@ export function getSubscriberMessageCount(db: D1Database, chatId: number) {
     )
     .bind(chatId)
     .first<{ c: number }>();
-}
-
-export function getOneRecentArticle(db: D1Database) {
-  return db
-    .prepare(
-      `SELECT a.*, s.name as source_name FROM articles a
-       JOIN sources s ON a.source_id = s.id
-       WHERE a.status = 'done' AND a.relevance_score >= 3
-       ORDER BY a.processed_at DESC LIMIT 1`
-    )
-    .first<Article & { source_name: string }>();
 }
 
 export async function upsertSubscriber(
@@ -342,7 +269,7 @@ export function getAllSources(db: D1Database) {
 // which previously killed fetchCron before any inserts ran. 'processing' is included
 // so rows orphaned by a worker killed mid-summarize also get reclaimed.
 export async function cleanupOldArticles(db: D1Database) {
-  const cond = `fetched_at < datetime('now', '-24 hours')
+  const cond = `fetched_at < datetime('now', '-${MAX_ARTICLE_AGE_HOURS} hours')
        AND status IN ('done', 'failed', 'raw', 'skipped', 'processing')`;
   const [, articleResult] = await db.batch([
     db.prepare(

@@ -144,11 +144,6 @@ async function messageIdFrom(resp: Response): Promise<number | null> {
   }
 }
 
-export async function setWebhook(token: string, url: string): Promise<boolean> {
-  const resp = await tgFetch(token, 'setWebhook', { url });
-  return resp.ok;
-}
-
 /**
  * Upload a WAV voice reading as a Telegram audio message. Best-effort — returns false
  * on ordinary failures and only throws BLOCKED/RATE_LIMITED (same contract as the other
