@@ -1,5 +1,5 @@
 import { GeminiResult } from '../types';
-import { GEMINI_MODEL, GEMMA_MODEL } from '../utils/constants';
+import { GEMINI_MODEL, GEMMA_MODEL, AUDIO_MAX_CHARS } from '../utils/constants';
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [2000, 5000];
@@ -36,7 +36,7 @@ async function callWithRetry(
 1. Categorize into exactly ONE: "ai", "programming", or "gaming"
 2. Rate importance 1-5 (for display only)
 3. Summarize in 2-4 paragraphs (field "summary")
-4. Produce a FULL faithful Persian translation of the whole article body (field "full_fa")
+4. Produce a Persian rendering of the article for reading aloud, capped in length (field "full_fa")
 
 ## Length & completeness (important)
 
@@ -46,8 +46,10 @@ async function callWithRetry(
 
 ## Full translation ("full_fa") — this is what gets read aloud
 
-- Translate the ENTIRE article body into Persian — do NOT summarize or shorten it. Keep every paragraph and detail.
-- It's a translation, not a retelling: preserve the article's structure and flow.
+- Produce a faithful Persian rendering of the article, but keep "full_fa" UNDER ${AUDIO_MAX_CHARS} characters. It is spoken aloud and the voice budget is limited, so this is a hard cap.
+- ALWAYS finish the final sentence. Never stop mid-sentence or mid-word — if you're approaching the ${AUDIO_MAX_CHARS}-character limit, wrap up the current thought and end cleanly rather than cutting off.
+- Within that budget, cover the article's most important points in order — the lead facts first. If the article is long, it's fine to leave out minor tail details, but never truncate mid-sentence to do so.
+- It's a translation, not a retelling: preserve the article's structure and flow for the parts you include.
 - This text is spoken aloud by a text-to-speech voice, so optimize it for LISTENING:
   - Prefer SHORTER sentences — break long, clause-heavy sentences into two or three short ones.
   - Use natural transitions between sentences and paragraphs so it flows when heard (e.g. «از طرف دیگه»، «در نهایت»، «نکته‌ی جالب اینه که»).
@@ -76,7 +78,7 @@ Article title: ${title}
 Article content: ${content}
 Source: ${sourceName}
 
-Respond in this exact JSON format (summary 2 to 4 paragraphs separated by \\n\\n and under 900 characters; full_fa the complete translation separated by \\n\\n; every sentence finished):
+Respond in this exact JSON format (summary 2 to 4 paragraphs separated by \\n\\n and under 900 characters; full_fa the Persian reading separated by \\n\\n and under ${AUDIO_MAX_CHARS} characters; every sentence finished):
 {"summary": "paragraph 1\\n\\nparagraph 2\\n\\n...up to paragraph 4", "full_fa": "full translation paragraph 1\\n\\nparagraph 2\\n\\n...", "category": "ai", "relevance_score": 4}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;

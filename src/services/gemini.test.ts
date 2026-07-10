@@ -55,12 +55,16 @@ describe('summarizeAndTranslate', () => {
     expect(out.full_fa).toBe('خلاصه');
   });
 
-  it('asks the model for a full translation to read aloud', async () => {
+  it('asks the model for a length-capped Persian reading', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'K');
     const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
     expect(prompt).toContain('full_fa');
-    expect(prompt).toContain('FULL faithful Persian translation');
+    // full_fa is read aloud and capped; the prompt must state a character limit and require
+    // finishing sentences.
+    expect(prompt).toContain('this is what gets read aloud');
+    expect(prompt).toMatch(/UNDER \d+ characters/);
+    expect(prompt).toContain('finish the final sentence');
   });
 
   it('sends prompt with title, content, and source in request body', async () => {

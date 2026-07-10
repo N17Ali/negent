@@ -26,11 +26,13 @@ export const TIMEZONE = 'Asia/Tehran';
 // if this fails. Flip SEND_AUDIO to false to disable without touching the pipeline.
 export const SEND_AUDIO = true;
 export const AUDIO_MODEL = 'gemini-2.5-flash-native-audio-latest';
-export const AUDIO_VOICE = 'Sulafat'; // warm female voice
+export const AUDIO_VOICE = 'Puck'; // upbeat male voice
 export const AUDIO_SAMPLE_RATE = 24000; // Live API returns 16-bit mono PCM at 24kHz
-export const AUDIO_MAX_CHARS = 15000; // hard cap on total text read aloud — high enough to
-// read a whole article end-to-end (we never summarize the audio), but bounded so a
-// pathologically long body can't spawn dozens of WebSocket sessions.
+export const AUDIO_MAX_CHARS = 1500; // hard cap on total text read aloud. On the free Workers
+// plan a single invocation's CPU budget can't decode/concat the PCM for a long reading — a
+// ~3000-char article (6 chunks, ~11MB PCM) tripped `exceededCpu`. Cap the spoken text to ~2
+// chunks so the audio math stays under budget; `generateAudio` trims to a sentence boundary
+// (never mid-sentence). Text delivery is unaffected — the full summary always ships.
 export const AUDIO_CHUNK_CHARS = 700; // ~230 tokens of Persian per chunk. The native-audio
 // Live API degrades WITHIN a single generation — the voice drifts robotic toward the middle
 // and end of a long turn — so we keep chunks short and stitch the PCM. Each chunk is its own

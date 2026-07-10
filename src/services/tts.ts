@@ -40,8 +40,9 @@ const GENERATION_TIMEOUT_MS = 30000;
 const SYSTEM_INSTRUCTION = `این متن خبری فارسی رو با لحن صمیمی، دوستانه و محاوره‌ای بخون، انگار داری برای یه دوست تعریف می‌کنی.
 
 نحوه‌ی خوندن:
-- طبیعی و روان بخون.
-- بین پاراگراف‌ها مکث کن.
+- تند و پرانرژی بخون، با ریتم سریع؛ کش نده و آروم نخون. هدف اینه که متن رو در زمان کمتر و با کلمات بیشتر در دقیقه بخونی.
+- طبیعی و روان بخون، ولی سریع.
+- مکث‌ها رو کوتاه نگه دار.
 - روی ایده‌های مهم تأکید بذار.
 - خلاصه نکن؛ چیزی به متن اضافه یا کم نکن.
 - کل متن رو تا آخر و کامل بخون.
@@ -61,7 +62,7 @@ export async function generateAudio(
   title: string,
   apiKey: string
 ): Promise<Uint8Array | null> {
-  const trimmed = text.slice(0, AUDIO_MAX_CHARS).trim();
+  const trimmed = trimToSentence(text.trim(), AUDIO_MAX_CHARS);
   if (!trimmed) return null;
 
   const chunks = chunkText(trimmed, AUDIO_CHUNK_CHARS);
@@ -94,6 +95,28 @@ export async function generateAudio(
     artist: 'negent',
     title,
   });
+}
+
+/**
+ * Cap the spoken text at `maxChars` WITHOUT cutting mid-sentence. If the text is already
+ * within the cap, return it whole. Otherwise take as many complete sentences as fit under
+ * the cap; if not even one sentence fits (a single very long sentence), fall back to the raw
+ * slice so we still read something. Sentence terminators cover Latin (.!?) and Persian (؟ ۔).
+ */
+export function trimToSentence(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+
+  const window = text.slice(0, maxChars);
+  // Last sentence terminator inside the window (any of . ! ? ؟ ۔), keeping the terminator.
+  let cut = -1;
+  for (let i = window.length - 1; i >= 0; i--) {
+    if ('.!?؟۔'.includes(window[i])) {
+      cut = i;
+      break;
+    }
+  }
+  if (cut >= 0) return window.slice(0, cut + 1).trim();
+  return window.trim(); // no sentence break found — read the raw slice rather than nothing
 }
 
 /**
