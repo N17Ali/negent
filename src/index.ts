@@ -1,8 +1,11 @@
 import { Env } from './types';
-import { fetchCron } from './cron/fetch';
-import { selectCron } from './cron/select';
-import { deliverCron } from './cron/deliver';
 import { handleUpdate } from './bot/commands';
+import { getCronHandler } from './utils/cronRegistry';
+
+// Import cron handlers to trigger their registerCron calls
+import './cron/fetch';
+import './cron/select';
+import './cron/deliver';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -34,8 +37,12 @@ export default {
     // lose the summary.
     if (url.pathname === `/run-select/${env.BOT_TOKEN}`) {
       const force = ['1', 'true', 'yes'].includes((url.searchParams.get('force') || '').toLowerCase());
+      const handler = getCronHandler('30 5,6,7,8,9,10,11,12,13,14,15,16 * * *');
+      if (!handler) {
+        return new Response('select cron not registered', { status: 500 });
+      }
       try {
-        await selectCron(env, force);
+        await handler(env, force);
       } catch (err) {
         console.error('run-select error:', err instanceof Error ? err.message : err);
         return new Response('select failed', { status: 500 });
@@ -49,9 +56,13 @@ export default {
     // Awaited inline for the same reason as run-select — test with `curl`, not a browser tab.
     if (url.pathname === `/run-deliver/${env.BOT_TOKEN}`) {
       const force = ['1', 'true', 'yes'].includes((url.searchParams.get('force') || '').toLowerCase());
+      const handler = getCronHandler('5-59/10 * * * *');
+      if (!handler) {
+        return new Response('deliver cron not registered', { status: 500 });
+      }
       try {
-        const sent = await deliverCron(env, force);
-        return new Response(sent ? 'delivered one' : 'nothing to deliver');
+        const sent = await handler(env, force);
+        return new Response(sent === true ? 'delivered one' : 'nothing to deliver');
       } catch (err) {
         console.error('run-deliver error:', err instanceof Error ? err.message : err);
         return new Response('deliver failed', { status: 500 });
@@ -63,24 +74,11 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     console.log(`cron triggered: "${event.cron}"`);
-    // AWAIT the handler rather than ctx.waitUntil(...). waitUntil work runs in a capped window
-    // that only opens once the invocation "ends" — for a cron that returns immediately, that
-    // window is tiny, which was silently killing the voice pass mid-generation
-    // ("waitUntil() tasks did not complete within the allowed time"). Awaiting keeps the whole
-    // invocation alive for the full duration of the pipeline; the audio is I/O-bound WebSocket
-    // streaming, so wall-clock is long but CPU stays well under the limit.
-    switch (event.cron) {
-      case '*/10 * * * *':
-        await fetchCron(env);
-        break;
-      case '5-59/10 * * * *':
-        await deliverCron(env);
-        break;
-      case '30 5,6,7,8,9,10,11,12,13,14,15,16 * * *':
-        await selectCron(env);
-        break;
-      default:
-        console.warn(`unknown cron expression: "${event.cron}"`);
+    const handler = getCronHandler(event.cron);
+    if (!handler) {
+      console.warn(`unknown cron expression: "${event.cron}"`);
+      return;
     }
+    await handler(env);
   },
 };

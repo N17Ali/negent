@@ -1,7 +1,8 @@
-import { Env } from '../types';
-import { selectTopArticles } from '../services/selector';
+import { Env, RawArticle, SelectedArticle } from '../types';
+import { selectTopArticles, ArticleCandidate } from '../services/selector';
 import { summarizeAndTranslate } from '../services/summarize';
 import { fetchArticleText } from '../services/extract';
+import { registerCron } from '../utils/cronRegistry';
 import {
   getRawArticlesBatch,
   getRecentDeliveredTitles,
@@ -37,7 +38,7 @@ export async function selectCron(env: Env, force = false): Promise<void> {
 
 async function selectAndSummarize(
   env: Env,
-  rawRows: { id: number; title: string; content_snippet: string | null; source_name: string | null }[]
+  rawRows: RawArticle[]
 ): Promise<void> {
   // Wider recent-delivered window than a single run so a story delivered earlier in the
   // day still guards against a same-story near-duplicate showing up hours later (the
@@ -48,7 +49,7 @@ async function selectAndSummarize(
   let selectedIds: number[];
   let bucketIds: number[] = [];
   try {
-    const candidates = rawRows.map((r) => ({
+    const candidates: ArticleCandidate[] = rawRows.map((r) => ({
       id: r.id,
       title: r.title,
       snippet: r.content_snippet || '',
@@ -139,3 +140,5 @@ async function selectAndSummarize(
 
   console.log(`select: summarized ${succeeded}/${selectedArticles.length} articles`);
 }
+
+registerCron('30 5,6,7,8,9,10,11,12,13,14,15,16 * * *', selectCron);

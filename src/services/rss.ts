@@ -103,15 +103,25 @@ function stripHtml(html: string): string {
 }
 
 export function normalizeUrl(rawUrl: string): string {
+  const stripped = stripTrackingParams(rawUrl);
   try {
-    const url = new URL(rawUrl);
-    const strip = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ref', 'source'];
-    strip.forEach((p) => url.searchParams.delete(p));
+    const url = new URL(stripped);
     url.pathname = url.pathname.replace(/\/+$/, '');
     url.hash = '';
     return url.toString().toLowerCase();
   } catch {
-    return rawUrl.toLowerCase().trim();
+    return stripped.toLowerCase().trim();
+  }
+}
+
+function stripTrackingParams(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    const strip = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ref', 'source'];
+    strip.forEach((p) => url.searchParams.delete(p));
+    return url.toString();
+  } catch {
+    return rawUrl;
   }
 }
 

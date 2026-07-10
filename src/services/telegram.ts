@@ -1,11 +1,11 @@
-import { Article } from '../types';
+import { DeliverableArticle } from '../types';
 import { MAX_CAPTION_LENGTH, MAX_MESSAGE_LENGTH } from '../utils/constants';
 
 const RLM = '\u200F';
 
 export async function sendArticle(
   chatId: number,
-  article: Article,
+  article: DeliverableArticle,
   sourceName: string,
   botToken: string
 ): Promise<number | null> {
@@ -85,11 +85,11 @@ async function sendVideo(
   return null;
 }
 
-function formatFooter(article: Article, sourceName: string): string {
+function formatFooter(article: DeliverableArticle, sourceName: string): string {
   return `\n\n🔗 <a href="${article.url}">منبع</a> | 📡 ${escapeHtml(sourceName)}`;
 }
 
-function formatMessage(article: Article, sourceName: string): string {
+function formatMessage(article: DeliverableArticle, sourceName: string): string {
   const footer = formatFooter(article, sourceName);
   const summary = formatSummary(article.summary_fa || '');
   const available = Math.max(0, MAX_MESSAGE_LENGTH - footer.length - 4);
@@ -113,9 +113,9 @@ function formatSummary(summary: string): string {
 
 function escapeHtmlPreserveLinks(text: string): string {
   return text
-    .replace(/&(?!(?:amp|lt|gt|quot|#39);)/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/&(?!(?:amp|lt|gt|quot|#39|#x27);)/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>');
 }
 
 export async function sendMessage(

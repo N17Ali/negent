@@ -116,18 +116,22 @@ src/
 ├── index.ts            # Worker entry: fetch (webhook/health) + scheduled (cron dispatch)
 ├── cron/
 │   ├── fetch.ts        # Pull one RSS source, filter, dedup, store raw
-│   └── select.ts       # Select → summarize → deliver → voice
+│   ├── select.ts       # Select → summarize → produce `done` articles
+│   └── deliver.ts      # Ship one `done` article (text + voice reply)
 ├── services/
 │   ├── rss.ts          # Dependency-free RSS/Atom parser
 │   ├── selector.ts     # Gemini story selection
-│   ├── gemini.ts       # Gemini summarize/translate to Persian
+│   ├── summarize.ts    # Gemini summarize/translate to Persian
 │   ├── tts.ts          # Gemini Live API voice (WebSocket)
-│   └── telegram.ts     # Telegram Bot API client + message formatting
+│   ├── telegram.ts     # Telegram Bot API client + message formatting
+│   └── geminiClient.ts # Shared Gemini HTTP/retry/fallback/JSON utilities
 ├── bot/commands.ts     # Bot command handlers
 ├── utils/
 │   ├── constants.ts    # All tuning knobs (batch sizes, hours, keywords, models)
 │   ├── filter.ts       # Keyword filtering
-│   └── audio.ts        # PCM → WAV wrapping
+│   ├── audio.ts        # PCM → WAV wrapping
+│   ├── time.ts         # Tehran delivery-hours gate
+│   └── cronRegistry.ts # Cron expression → handler registry
 ├── db.ts               # D1 queries
 └── types.ts            # Env bindings + domain types
 ```

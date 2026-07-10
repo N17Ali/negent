@@ -73,9 +73,7 @@ An article qualifies ONLY if a well-informed engineer would consider it real, co
 
 ## Taste (learn from these examples)
 
-WANT — technically deep and NOVEL. The reader learns something or sees a clever hack:
-- "I built a linter that catches the security bugs AI assistants keep writing" — a tool solving a genuinely new, real problem.
-- A single-file dependency-free C engine that streams a 744B-parameter MoE model on 25GB of consumer RAM — non-obvious, impressive engineering.
+WANT — technically deep and NOVEL. The reader learns something or sees a clever hack
 
 DO NOT WANT — generic, derivative, or non-technical, even if well-written or popular:
 - "I built an open-source spreadsheet app as an alternative to Google Sheets" — a me-too clone of an existing product; no novelty.

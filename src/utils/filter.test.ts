@@ -50,4 +50,10 @@ describe('isRelevantArticle', () => {
     expect(isRelevantArticle('Game of the Year 2024', '')).toBe(true);
     expect(isRelevantArticle('Game engine comparison', 'Unity vs Unreal')).toBe(true);
   });
+
+  it('does not match partial keywords', () => {
+    expect(isRelevantArticle('openaicustom', '')).toBe(false);
+    expect(isRelevantArticle('myreact', '')).toBe(false);
+    expect(isRelevantArticle('githubactions', '')).toBe(false);
+  });
 });

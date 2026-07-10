@@ -1,4 +1,4 @@
-import { Source, Article, Subscriber } from './types';
+import { Source, Subscriber, RawArticle, SelectedArticle, DoneArticle, DeliverableArticle } from './types';
 import { MIN_RELEVANCE_SCORE, MAX_ARTICLE_AGE_HOURS } from './utils/constants';
 
 export function getNextSource(db: D1Database) {
@@ -58,7 +58,9 @@ export function batchInsertArticles(
 export function getRawArticlesBatch(db: D1Database, limit: number) {
   return db
     .prepare(
-      `SELECT a.id, a.title, a.content_snippet, s.name as source_name FROM articles a
+      `SELECT a.id, a.source_id, a.url, a.url_hash, a.title, a.content_snippet,
+              a.media_url, a.media_type, a.published_at, a.fetched_at, s.name as source_name
+       FROM articles a
        LEFT JOIN sources s ON a.source_id = s.id
        WHERE a.status = 'raw'
        AND a.fetched_at > datetime('now', '-${MAX_ARTICLE_AGE_HOURS} hours')
@@ -66,7 +68,7 @@ export function getRawArticlesBatch(db: D1Database, limit: number) {
        LIMIT ?`
     )
     .bind(limit)
-    .all<{ id: number; title: string; content_snippet: string | null; source_name: string | null }>();
+    .all<RawArticle>();
 }
 
 // D1 caps bound parameters at 100 per statement, so batch large id lists.
@@ -101,12 +103,14 @@ export function markArticlesSelected(db: D1Database, ids: number[]) {
 export function getSelectedArticles(db: D1Database) {
   return db
     .prepare(
-      `SELECT a.*, s.name as source_name FROM articles a
+      `SELECT a.id, a.source_id, a.url, a.title, a.content_snippet, a.media_url, a.media_type,
+              a.published_at, a.fetched_at, s.name as source_name
+       FROM articles a
        JOIN sources s ON a.source_id = s.id
        WHERE a.status = 'selected'
        ORDER BY a.fetched_at ASC`
     )
-    .all<Article & { source_name: string }>();
+    .all<SelectedArticle & { source_name: string }>();
 }
 
 export function lockArticle(db: D1Database, articleId: number) {
@@ -149,22 +153,28 @@ export function markArticleFailed(db: D1Database, articleId: number, error: stri
 export function getUndeliveredArticles(db: D1Database, limit: number) {
   return db
     .prepare(
-      `SELECT a.*, s.name as source_name FROM articles a
+      `SELECT a.id, a.source_id, a.url, a.title, a.content_snippet, a.media_url, a.media_type,
+              a.published_at, a.fetched_at, a.summary_fa, a.full_fa, a.category, a.relevance_score,
+              a.processed_at, s.name as source_name
+       FROM articles a
        JOIN sources s ON a.source_id = s.id
        WHERE a.status = 'done' AND a.delivered = 0 AND a.relevance_score >= ?
        ORDER BY a.processed_at DESC
        LIMIT ?`
     )
     .bind(MIN_RELEVANCE_SCORE, limit)
-    .all<Article & { source_name: string }>();
+    .all<DeliverableArticle>();
 }
 
 export function getRecentDeliveredTitles(db: D1Database, limit: number) {
   return db
     .prepare(
-      `SELECT DISTINCT a.title FROM articles a
-       WHERE a.delivered = 1
-       ORDER BY a.delivered_at DESC LIMIT ?`
+      `SELECT title FROM (
+         SELECT title, MAX(delivered_at) AS max_delivered_at
+         FROM articles
+         WHERE delivered = 1
+         GROUP BY title
+       ) ORDER BY max_delivered_at DESC LIMIT ?`
     )
     .bind(limit)
     .all<{ title: string }>();
@@ -223,15 +233,28 @@ export async function upsertSubscriber(
     .first();
   const isNew = !existing;
 
+  // Insert with is_admin=0 first, then promote the very first subscriber.
+  // This avoids a race where concurrent first /start calls both see COUNT=0.
   await db
     .prepare(
       `INSERT INTO subscribers (chat_id, username, first_name, is_active, is_admin)
-       VALUES (?, ?, ?, 1, CASE WHEN (SELECT COUNT(*) FROM subscribers) = 0 THEN 1 ELSE 0 END)
+       VALUES (?, ?, ?, 1, 0)
        ON CONFLICT(chat_id) DO UPDATE SET
          is_active = 1, username = excluded.username, first_name = excluded.first_name, stopped_at = NULL`
     )
     .bind(chatId, username, firstName)
     .run();
+
+  if (isNew) {
+    await db
+      .prepare(
+        `UPDATE subscribers SET is_admin = 1
+         WHERE chat_id = ?
+         AND (SELECT COUNT(*) FROM subscribers WHERE is_admin = 1) = 0`
+      )
+      .bind(chatId)
+      .run();
+  }
 
   return { isNew };
 }
