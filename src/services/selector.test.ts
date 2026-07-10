@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { selectTopArticles } from './selector';
-import { GEMINI_MODEL, GEMMA_MODEL } from '../utils/constants';
+import { GEMINI_MODEL, GEMMA_MODEL, SELECT_TOP_N } from '../utils/constants';
 
 const OK_RESPONSE = (text: string) =>
   ({
@@ -180,7 +180,7 @@ describe('selectTopArticles', () => {
     fetchMock.mockResolvedValueOnce(ERR_RESPONSE(500, 'server error'));
     await expect(
       selectTopArticles([{ id: 1, title: 'T', snippet: '', source: 'S' }], [], 'KEY')
-    ).rejects.toThrow('Selector API error 500: server error');
+    ).rejects.toThrow('selector API error 500: server error');
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -213,6 +213,6 @@ describe('selectTopArticles', () => {
       source: 'S',
     }));
     const { selected } = await selectTopArticles(candidates, [], 'KEY');
-    expect(selected.length).toBeLessThanOrEqual(10);
+    expect(selected).toHaveLength(SELECT_TOP_N);
   });
 });

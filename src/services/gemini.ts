@@ -1,9 +1,15 @@
 import { GeminiResult } from '../types';
-import { GEMINI_MODEL, GEMMA_MODEL, AUDIO_MAX_CHARS } from '../utils/constants';
+import { AUDIO_MAX_CHARS } from '../utils/constants';
+import { buildGeminiUrl, buildGeminiBody, callAndParse, withModelFallback, extractJsonObject, type RetryOptions } from './geminiClient';
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [2000, 5000];
-const RETRYABLE_STATUS = new Set([429, 503]);
+
+const RETRY: RetryOptions = {
+  maxAttempts: MAX_ATTEMPTS,
+  retryDelaysMs: RETRY_DELAYS_MS,
+  label: 'gemini',
+};
 
 export async function summarizeAndTranslate(
   title: string,
@@ -11,25 +17,26 @@ export async function summarizeAndTranslate(
   sourceName: string,
   apiKey: string
 ): Promise<GeminiResult> {
-  try {
-    return await callWithRetry(title, content, sourceName, apiKey, GEMINI_MODEL);
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('RATE_LIMITED')) {
-      console.warn(`gemini: primary model ${GEMINI_MODEL} rate-limited, falling back to ${GEMMA_MODEL}`);
-      return await callWithRetry(title, content, sourceName, apiKey, GEMMA_MODEL);
-    }
-    throw err;
-  }
+  return withModelFallback((model) => callModel(model, title, content, sourceName, apiKey), 'gemini');
 }
 
-async function callWithRetry(
+async function callModel(
+  model: string,
   title: string,
   content: string,
   sourceName: string,
-  apiKey: string,
-  model: string
+  apiKey: string
 ): Promise<GeminiResult> {
-  const prompt = `You are a Persian tech news translator and summarizer.
+  const prompt = buildPrompt(title, content, sourceName);
+  const url = buildGeminiUrl(model, apiKey);
+  const body = buildGeminiBody(prompt, 0.3, 8192);
+  const retry: RetryOptions = { ...RETRY, label: model };
+
+  return callAndParse(url, body, parseResult, 'Gemini', retry);
+}
+
+function buildPrompt(title: string, content: string, sourceName: string): string {
+  return `You are a Persian tech news translator and summarizer.
 
 ## Task
 
@@ -80,122 +87,15 @@ Source: ${sourceName}
 
 Respond in this exact JSON format (summary 2 to 4 paragraphs separated by \\n\\n and under 900 characters; full_fa the Persian reading separated by \\n\\n and under ${AUDIO_MAX_CHARS} characters; every sentence finished):
 {"summary": "paragraph 1\\n\\nparagraph 2\\n\\n...up to paragraph 4", "full_fa": "full translation paragraph 1\\n\\nparagraph 2\\n\\n...", "category": "ai", "relevance_score": 4}`;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const requestBody = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.3,
-      maxOutputTokens: 8192,
-      responseMimeType: 'application/json',
-    },
-  });
-
-  let lastError: Error | null = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      return await callGemini(url, requestBody);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      const status = (lastError as GeminiError).status;
-      const retryable = status !== undefined && RETRYABLE_STATUS.has(status);
-
-      if (attempt < MAX_ATTEMPTS && retryable) {
-        const delay = RETRY_DELAYS_MS[attempt - 1];
-        console.warn(
-          `${model}: attempt ${attempt}/${MAX_ATTEMPTS} failed (${lastError.message}), retrying in ${delay}ms...`
-        );
-        await sleep(delay);
-        continue;
-      }
-      throw lastError;
-    }
-  }
-
-  throw lastError || new Error('gemini: exhausted retries');
 }
 
-interface GeminiError extends Error {
-  status?: number;
-}
-
-async function callGemini(url: string, body: string): Promise<GeminiResult> {
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  });
-
-  if (!resp.ok) {
-    let detail = '';
-    try {
-      const errBody = (await resp.json()) as { error?: { message?: string } };
-      detail = errBody.error?.message || '';
-    } catch { }
-    const err: GeminiError = new Error(
-      resp.status === 429
-        ? `RATE_LIMITED: ${detail || 'quota exceeded'}`
-        : `Gemini API error ${resp.status}: ${detail || 'unknown'}`
-    );
-    err.status = resp.status;
-    throw err;
-  }
-
-  const data = (await resp.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Empty Gemini response');
-
-  const parsed: GeminiResult = JSON.parse(extractJsonObject(text));
+function parseResult(text: string): GeminiResult {
+  const parsed = JSON.parse(extractJsonObject(text)) as GeminiResult;
   if (!parsed.summary) throw new Error('No summary in Gemini response');
   if (!parsed.category) throw new Error('No category in Gemini response');
   if (typeof parsed.relevance_score !== 'number')
     throw new Error('No relevance_score in Gemini response');
 
-  // full_fa is the full translation read aloud. Optional — if the model omits it, fall
-  // back to the summary so the article still ships (with a shorter voice reading).
   if (!parsed.full_fa) parsed.full_fa = parsed.summary;
-
   return parsed;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Pull the first balanced top-level JSON object out of a model response. Gemini with
- * responseMimeType 'application/json' *usually* returns clean JSON, but occasionally wraps
- * it in ```json fences or appends stray text after the closing brace — which made a raw
- * JSON.parse throw "Unexpected non-whitespace character after JSON" and drop the article.
- * Scanning brace depth (while ignoring braces inside strings) returns just the object.
- */
-function extractJsonObject(text: string): string {
-  const start = text.indexOf('{');
-  if (start === -1) return text.trim();
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
-    }
-  }
-  // Unbalanced (e.g. truncated at maxOutputTokens): return from the first brace and let
-  // JSON.parse surface the error, same as before.
-  return text.slice(start).trim();
 }

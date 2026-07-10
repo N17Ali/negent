@@ -1,8 +1,8 @@
-import { SELECT_TOP_N, GEMINI_MODEL, GEMMA_MODEL } from '../utils/constants';
+import { SELECT_TOP_N } from '../utils/constants';
+import { buildGeminiUrl, buildGeminiBody, callAndParse, withModelFallback, extractJsonObject, type RetryOptions } from './geminiClient';
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [3000, 8000];
-const RETRYABLE_STATUS = new Set([429, 503]);
 
 export interface ArticleCandidate {
   id: number;
@@ -16,42 +16,40 @@ export interface SelectedArticle {
   reason: string;
 }
 
-/**
- * Selector output. `selected` is the top-N to ship now; `bucket` holds articles the
- * selector judged genuinely important but which lost the top-N slots to more important
- * stories. Bucket articles are kept (left `raw`) and reconsidered on the next run rather
- * than being skipped, so a strong story isn't dropped just because a better one showed up
- * the same batch.
- */
 export interface SelectionResult {
   selected: SelectedArticle[];
   bucket: number[];
 }
+
+const RETRY: RetryOptions = {
+  maxAttempts: MAX_ATTEMPTS,
+  retryDelaysMs: RETRY_DELAYS_MS,
+  label: 'selector',
+};
 
 export async function selectTopArticles(
   candidates: ArticleCandidate[],
   recentTitles: string[],
   apiKey: string
 ): Promise<SelectionResult> {
-  try {
-    return await callWithRetry(candidates, recentTitles, apiKey, GEMINI_MODEL);
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('RATE_LIMITED')) {
-      console.warn(
-        `selector: primary model ${GEMINI_MODEL} rate-limited, falling back to ${GEMMA_MODEL}`
-      );
-      return await callWithRetry(candidates, recentTitles, apiKey, GEMMA_MODEL);
-    }
-    throw err;
-  }
+  return withModelFallback((model) => callModel(model, candidates, recentTitles, apiKey), 'selector');
 }
 
-async function callWithRetry(
+async function callModel(
+  model: string,
   candidates: ArticleCandidate[],
   recentTitles: string[],
-  apiKey: string,
-  model: string
+  apiKey: string
 ): Promise<SelectionResult> {
+  const prompt = buildPrompt(candidates, recentTitles);
+  const url = buildGeminiUrl(model, apiKey);
+  const body = buildGeminiBody(prompt, 0.2, 16384);
+  const retry: RetryOptions = { ...RETRY, label: model };
+
+  return callAndParse(url, body, (text) => parseSelection(text, candidates), 'selector', retry);
+}
+
+function buildPrompt(candidates: ArticleCandidate[], recentTitles: string[]): string {
   const recentList =
     recentTitles.length > 0
       ? `\n\nAlready delivered (do NOT select these or any article covering the same story):\n${recentTitles.map((t) => `- ${t}`).join('\n')}`
@@ -64,7 +62,7 @@ async function callWithRetry(
     )
     .join(',\n');
 
-  const prompt = `You are an EXTREMELY STRICT tech news curator. Select AT MOST ${SELECT_TOP_N} articles — only the ones that are genuinely important, must-know news for a sophisticated tech audience. Be ruthless. The default answer for any given article is NO.
+  return `You are an EXTREMELY STRICT tech news curator. Select AT MOST ${SELECT_TOP_N} articles — only the ones that are genuinely important, must-know news for a sophisticated tech audience. Be ruthless. The default answer for any given article is NO.
 
 ## The bar (only clear YES stories qualify)
 
@@ -108,80 +106,10 @@ Select up to ${SELECT_TOP_N} articles for "selected" — fewer (or none) is expe
 
 Respond in this exact JSON format:
 {"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}], "bucket": [789, 1011]}`;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const requestBody = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 16384,
-      responseMimeType: 'application/json',
-    },
-  });
-
-  let lastError: Error | null = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      return await callGemini(url, requestBody, candidates);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      const status = (lastError as SelectorError).status;
-      const retryable = status !== undefined && RETRYABLE_STATUS.has(status);
-
-      if (attempt < MAX_ATTEMPTS && retryable) {
-        const delay = RETRY_DELAYS_MS[attempt - 1];
-        console.warn(
-          `${model}: attempt ${attempt}/${MAX_ATTEMPTS} failed (${lastError.message}), retrying in ${delay}ms...`
-        );
-        await sleep(delay);
-        continue;
-      }
-      throw lastError;
-    }
-  }
-
-  throw lastError || new Error('selector: exhausted retries');
 }
 
-interface SelectorError extends Error {
-  status?: number;
-}
-
-async function callGemini(
-  url: string,
-  body: string,
-  candidates: ArticleCandidate[]
-): Promise<SelectionResult> {
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  });
-
-  if (!resp.ok) {
-    let detail = '';
-    try {
-      const errBody = (await resp.json()) as { error?: { message?: string } };
-      detail = errBody.error?.message || '';
-    } catch {}
-    const err: SelectorError = new Error(
-      resp.status === 429
-        ? `RATE_LIMITED: ${detail || 'quota exceeded'}`
-        : `Selector API error ${resp.status}: ${detail || 'unknown'}`
-    );
-    err.status = resp.status;
-    throw err;
-  }
-
-  const data = (await resp.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) throw new Error('Empty selector response');
-
-  const parsed = JSON.parse(stripMarkdownFences(content)) as {
+function parseSelection(text: string, candidates: ArticleCandidate[]): SelectionResult {
+  const parsed = JSON.parse(extractJsonObject(text)) as {
     selected: SelectedArticle[];
     bucket?: number[];
   };
@@ -193,7 +121,6 @@ async function callGemini(
     .filter((s) => validIds.has(s.id))
     .slice(0, SELECT_TOP_N);
 
-  // Runner-ups: valid, not already selected, deduped. Kept raw for the next run.
   const selectedIds = new Set(selected.map((s) => s.id));
   const bucket = Array.isArray(parsed.bucket)
     ? [...new Set(parsed.bucket)].filter((id) => validIds.has(id) && !selectedIds.has(id))
@@ -204,17 +131,4 @@ async function callGemini(
   );
 
   return { selected, bucket };
-}
-
-function stripMarkdownFences(text: string): string {
-  let s = text.trim();
-  if (s.startsWith('```')) {
-    s = s.replace(/^```(?:json)?\s*\n?/, '');
-    s = s.replace(/\n?```\s*$/, '');
-  }
-  return s.trim();
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

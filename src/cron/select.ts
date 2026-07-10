@@ -12,7 +12,7 @@ import {
   markArticleDone,
   markArticleFailed,
 } from '../db';
-import { BATCH_SELECT_SIZE } from '../utils/constants';
+import { BATCH_SELECT_SIZE, RECENT_DELIVERED_TITLES } from '../utils/constants';
 import { isWithinDeliveryHours } from '../utils/time';
 
 export async function selectCron(env: Env, force = false): Promise<void> {
@@ -42,7 +42,7 @@ async function selectAndSummarize(
   // Wider recent-delivered window than a single run so a story delivered earlier in the
   // day still guards against a same-story near-duplicate showing up hours later (the
   // selector has no memory of past runs — this list is its only cross-run dedup signal).
-  const { results: recent } = await getRecentDeliveredTitles(env.DB, 50);
+  const { results: recent } = await getRecentDeliveredTitles(env.DB, RECENT_DELIVERED_TITLES);
   const recentTitles = recent.map((r) => r.title);
 
   let selectedIds: number[];
