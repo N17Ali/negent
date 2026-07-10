@@ -71,11 +71,24 @@ async function callWithRetry(
 An article qualifies ONLY if a well-informed engineer would consider it real, consequential news that they'd want to hear about today:
 - **Games** — a major release, a significant delay, or a headline announcement from a major studio (or a genuinely landmark indie moment). Not roundups, reviews, sales, patches, or minor updates.
 - **AI** — a genuinely new model, a real capability breakthrough, a major product/API launch, or a significant policy/safety development. Not incremental tweaks, hype pieces, funding rumors, or "X company might do Y".
-- **Programming** — a major framework/tool release, a serious security issue (real CVE with impact), or a meaningful industry shift. Not tutorials, tips, opinion, or minor version bumps.
+- **Programming & projects** — a major framework/tool release, a serious security issue (real CVE with impact), a meaningful industry shift, OR a genuinely novel, technically deep tool/project (clever engineering, a new capability, a non-obvious hack). Not tutorials, tips, opinion, format-conversion or "how to convert X to Y" comparisons, or minor version bumps.
+
+## Taste (learn from these examples)
+
+WANT — technically deep and NOVEL. The reader learns something or sees a clever hack:
+- "I built a linter that catches the security bugs AI assistants keep writing" — a tool solving a genuinely new, real problem.
+- A single-file dependency-free C engine that streams a 744B-parameter MoE model on 25GB of consumer RAM — non-obvious, impressive engineering.
+
+DO NOT WANT — generic, derivative, or non-technical, even if well-written or popular:
+- "I built an open-source spreadsheet app as an alternative to Google Sheets" — a me-too clone of an existing product; no novelty.
+- "JSON to Python dataclass / TypedDict / or Pydantic" — a tutorial / format-conversion / how-to comparison.
+- "Paris-based AI voice startup raises $100M seed backed by Nvidia" — business/funding news. Funding rounds, valuations, raises, and acquisitions are NOT interesting even when confirmed.
+
+The "I built X" framing is neither good nor bad on its own — judge the substance. A novel tool that attacks a real problem cleverly is a YES; a clone of a well-known app is a NO.
 
 ## Reject aggressively
 
-Say NO to: opinion/editorial, tutorials/how-tos/tips, listicles and roundups, speculation and rumors, marketing/PR fluff, incremental or minor updates, clickbait, and anything you're unsure about. If it's not obviously important, it does not qualify.
+Say NO to: opinion/editorial, tutorials/how-tos/tips, format-conversion or "X vs Y" comparisons, listicles and roundups, speculation and rumors, business/funding/fundraising/acquisition news, marketing/PR fluff, derivative clones of existing products, incremental or minor updates, clickbait, and anything you're unsure about. If it's not obviously important AND (consequential OR technically novel), it does not qualify.
 
 ## Quantity: prefer FEWER, and it is fine to select ZERO
 
