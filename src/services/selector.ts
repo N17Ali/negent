@@ -64,16 +64,22 @@ async function callWithRetry(
     )
     .join(',\n');
 
-  const prompt = `You are a tech news curator. Select the ${SELECT_TOP_N} most interesting articles from the list below.
+  const prompt = `You are an EXTREMELY STRICT tech news curator. Select AT MOST ${SELECT_TOP_N} articles — only the ones that are genuinely important, must-know news for a sophisticated tech audience. Be ruthless. The default answer for any given article is NO.
 
-## What qualifies as important
+## The bar (only clear YES stories qualify)
 
-Prefer concrete news that matters to a tech-savvy audience:
-- **Games** — notable releases, delays, or announcements (major studios especially, but strong indie news counts too).
-- **AI** — new models, notable capability advances, significant product/API launches, or policy/safety changes.
-- **Programming** — framework or tool releases, notable version launches, security issues (CVEs), or meaningful industry shifts.
+An article qualifies ONLY if a well-informed engineer would consider it real, consequential news that they'd want to hear about today:
+- **Games** — a major release, a significant delay, or a headline announcement from a major studio (or a genuinely landmark indie moment). Not roundups, reviews, sales, patches, or minor updates.
+- **AI** — a genuinely new model, a real capability breakthrough, a major product/API launch, or a significant policy/safety development. Not incremental tweaks, hype pieces, funding rumors, or "X company might do Y".
+- **Programming** — a major framework/tool release, a serious security issue (real CVE with impact), or a meaningful industry shift. Not tutorials, tips, opinion, or minor version bumps.
 
-Favor real news over pure opinion pieces, tutorials, and how-to tips. Aim to fill all ${SELECT_TOP_N} slots when there are enough reasonable candidates; only pick fewer if there genuinely aren't ${SELECT_TOP_N} worthwhile stories.
+## Reject aggressively
+
+Say NO to: opinion/editorial, tutorials/how-tos/tips, listicles and roundups, speculation and rumors, marketing/PR fluff, incremental or minor updates, clickbait, and anything you're unsure about. If it's not obviously important, it does not qualify.
+
+## Quantity: prefer FEWER, and it is fine to select ZERO
+
+Do NOT try to fill ${SELECT_TOP_N} slots. Only select an article if it clears the bar above on its own merits. Most batches should yield 0–2 selections. Selecting ${SELECT_TOP_N} should be rare and only when there are genuinely that many must-know stories. An empty selection is the correct answer when nothing is important enough — never pad the list with mediocre stories to reach a number.
 
 ## Deduplicate (important)
 
@@ -85,7 +91,7 @@ ${articleList}
 ]
 ${recentList}
 
-Select up to ${SELECT_TOP_N} articles for "selected". Additionally, if there are OTHER articles that are genuinely worthwhile by the bar above but didn't make the top ${SELECT_TOP_N} (they lost their slot to more important stories), list just their ids in "bucket" so they can be reconsidered next time. Do NOT put weak articles in "bucket" — only ones you'd have selected if there were more room. Never put the same id in both lists.
+Select up to ${SELECT_TOP_N} articles for "selected" — fewer (or none) is expected and correct when few clear the bar. Additionally, if there are OTHER articles that genuinely clear the strict bar above but lost their slot only because you were already at ${SELECT_TOP_N}, list just their ids in "bucket" so they can be reconsidered next time. The bucket must hold ONLY articles you'd have selected outright — if in doubt, leave it out. Most runs should have an empty bucket. Never put the same id in both lists.
 
 Respond in this exact JSON format:
 {"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}], "bucket": [789, 1011]}`;
