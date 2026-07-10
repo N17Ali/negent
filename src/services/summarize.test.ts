@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { summarizeAndTranslate } from './gemini';
+import { summarizeAndTranslate } from './summarize';
 
 const OK_RESPONSE = (text: string) =>
   ({

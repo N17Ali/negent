@@ -1,6 +1,6 @@
 import { Env } from '../types';
 import { selectTopArticles } from '../services/selector';
-import { summarizeAndTranslate } from '../services/gemini';
+import { summarizeAndTranslate } from '../services/summarize';
 import { fetchArticleText } from '../services/extract';
 import {
   getRawArticlesBatch,
