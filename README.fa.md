@@ -140,18 +140,22 @@ src/
 ├── index.ts            # ورودی Worker: fetch (webhook/health) + scheduled (cron dispatch)
 ├── cron/
 │   ├── fetch.ts        # کشیدن یک منبع RSS، فیلتر، حذف تکراری، ذخیرهٔ خام
-│   └── select.ts       # انتخاب → خلاصه → ارسال → صدا
+│   ├── select.ts       # انتخاب → خلاصه → تولید مقاله‌های `done`
+│   └── deliver.ts      # ارسال یک مقاله `done` (متن + پاسخ صوتی)
 ├── services/
 │   ├── rss.ts          # پارسر RSS/Atom بدون dependency
 │   ├── selector.ts     # انتخاب خبر با Gemini
-│   ├── gemini.ts       # خلاصه/ترجمه به فارسی با Gemini
+│   ├── summarize.ts    # خلاصه/ترجمه به فارسی با Gemini
 │   ├── tts.ts          # صدای Gemini Live API (WebSocket)
-│   └── telegram.ts     # کلاینت Telegram Bot API + فرمت پیام
+│   ├── telegram.ts     # کلاینت Telegram Bot API + فرمت پیام
+│   └── geminiClient.ts # ابزارهای مشترک Gemini HTTP/retry/fallback/JSON
 ├── bot/commands.ts     # هندلر دستورهای بات
 ├── utils/
 │   ├── constants.ts    # همهٔ تنظیمات (اندازهٔ batch، ساعت‌ها، کلمات کلیدی، مدل‌ها)
 │   ├── filter.ts       # فیلتر کلمات کلیدی
-│   └── audio.ts        # تبدیل PCM به WAV
+│   ├── audio.ts        # تبدیل PCM به WAV
+│   ├── time.ts         # گیت تحویل ساعات تهران
+│   └── cronRegistry.ts # رجیستری عبارت کرون → هندلر
 ├── db.ts               # کوئری‌های D1
 └── types.ts            # bindings محیط + تایپ‌های دامنه
 ```

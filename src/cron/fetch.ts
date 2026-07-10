@@ -3,6 +3,7 @@ import { parseFeed, computeUrlHash, parsePubDate } from '../services/rss';
 import { getNextSource, advanceSourceOrder, batchInsertArticles, ArticleInsert, cleanupOldArticles } from '../db';
 import { isRelevantArticle } from '../utils/filter';
 import { MAX_ARTICLE_AGE_HOURS } from '../utils/constants';
+import { registerCron } from '../utils/cronRegistry';
 
 export async function fetchCron(env: Env): Promise<void> {
   // Cleanup is best-effort — fetching new articles is the point of this cron, so a
@@ -88,3 +89,5 @@ export async function fetchCron(env: Env): Promise<void> {
   );
   await advanceSourceOrder(env.DB, source.id);
 }
+
+registerCron('*/10 * * * *', fetchCron);

@@ -1,6 +1,7 @@
 import { Env } from '../types';
 import { sendArticle, sendAudio } from '../services/telegram';
 import { generateAudio } from '../services/tts';
+import { registerCron } from '../utils/cronRegistry';
 import {
   getUndeliveredArticles,
   getActiveSubscribers,
@@ -132,3 +133,5 @@ export async function deliverCron(env: Env, force = false): Promise<boolean> {
 
   return anyDelivered;
 }
+
+registerCron('5-59/10 * * * *', deliverCron);

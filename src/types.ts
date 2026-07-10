@@ -38,6 +38,59 @@ export interface Article {
   delivered_at: string | null;
 }
 
+/** Article in `raw` state — fetched, not yet selected. */
+export interface RawArticle {
+  id: number;
+  source_id: number;
+  url: string;
+  url_hash: string;
+  title: string;
+  content_snippet: string | null;
+  media_url: string | null;
+  media_type: 'photo' | 'video' | null;
+  published_at: string | null;
+  fetched_at: string;
+  source_name?: string;
+}
+
+/** Article in `selected` state — chosen by LLM, awaiting summarization. */
+export interface SelectedArticle {
+  id: number;
+  source_id: number;
+  url: string;
+  title: string;
+  content_snippet: string | null;
+  media_url: string | null;
+  media_type: 'photo' | 'video' | null;
+  published_at: string | null;
+  fetched_at: string;
+  source_name?: string;
+}
+
+/** Article in `done` state — summarized, translated, ready for delivery. */
+export interface DoneArticle {
+  id: number;
+  source_id: number;
+  url: string;
+  title: string;
+  content_snippet: string | null;
+  media_url: string | null;
+  media_type: 'photo' | 'video' | null;
+  published_at: string | null;
+  fetched_at: string;
+  summary_fa: string;
+  full_fa: string;
+  category: string;
+  relevance_score: number;
+  processed_at: string;
+  source_name?: string;
+}
+
+/** Subset of DoneArticle passed to Telegram sender (with source_name required). */
+export interface DeliverableArticle extends DoneArticle {
+  source_name: string;
+}
+
 export interface Subscriber {
   id: number;
   chat_id: number;

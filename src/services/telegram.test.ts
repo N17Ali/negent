@@ -1,29 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sendArticle, sendMessage, sendAudio } from './telegram';
-import { Article } from '../types';
+import { DeliverableArticle } from '../types';
 
-function makeArticle(overrides: Partial<Article> = {}): Article {
+function makeArticle(overrides: Partial<DeliverableArticle> = {}): DeliverableArticle {
   return {
     id: 1,
     source_id: 1,
     url: 'https://example.com/article',
-    url_hash: 'hash',
     title: 'Test Title',
     content_snippet: null,
     media_url: null,
     media_type: null,
     published_at: null,
     fetched_at: '2024-01-01',
-    status: 'done',
     summary_fa: 'Summary text.',
     full_fa: 'Full translation text.',
     category: 'ai',
     relevance_score: 4,
-    processed_at: null,
-    error_message: null,
-    retry_count: 0,
-    delivered: 0,
-    delivered_at: null,
+    processed_at: '2024-01-01T00:00:00Z',
+    source_name: 'TestSource',
     ...overrides,
   };
 }
