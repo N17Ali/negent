@@ -71,8 +71,8 @@ export function getRawArticlesBatch(db: D1Database, limit: number) {
     .all<RawArticle>();
 }
 
-// D1 caps bound parameters at 100 per statement, so batch large id lists.
-const D1_MAX_VARS = 100;
+// D1 caps bound parameters at 100 per statement. We bind status + ids, so chunk at 99.
+const D1_MAX_VARS = 99;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
