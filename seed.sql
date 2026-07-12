@@ -4,7 +4,6 @@ INSERT OR IGNORE INTO sources (url, name, fetch_order) VALUES
   ('https://feeds.arstechnica.com/arstechnica/index', 'Ars Technica', 3),
   ('https://hnrss.org/frontpage', 'Hacker News', 4),
   ('https://openai.com/blog/rss.xml', 'OpenAI Blog', 5),
-  ('https://dev.to/feed', 'Dev.to', 6),
   ('https://feeds.feedburner.com/ign/news', 'IGN', 7),
   ('https://www.eurogamer.net/feed', 'Eurogamer', 8),
   ('https://www.rockpapershotgun.com/feed', 'Rock Paper Shotgun', 9);
