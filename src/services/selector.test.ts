@@ -108,6 +108,18 @@ describe('selectTopArticles', () => {
     expect(body.generationConfig.temperature).toBe(0.2);
   });
 
+  it('puts curation rules in systemInstruction, not in user content', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
+    const candidates = [{ id: 1, title: 'GTA 6', snippet: 'delayed', source: 'IGN' }];
+    await selectTopArticles(candidates, [], 'KEY');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.systemInstruction).toBeDefined();
+    expect(body.systemInstruction.parts[0].text).toContain('tech news curator');
+    expect(body.systemInstruction.parts[0].text).toContain('Clear YES');
+    // Article data stays in user content, not system instruction
+    expect(body.systemInstruction.parts[0].text).not.toContain('GTA 6');
+  });
+
   it('includes recent delivered titles in prompt for dedup', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_SELECTION));
     const candidates = [{ id: 1, title: 'Test', snippet: '', source: 'S' }];

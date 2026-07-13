@@ -58,13 +58,14 @@ describe('summarizeAndTranslate', () => {
   it('asks the model for a length-capped Persian reading', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'K');
-    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
-    expect(prompt).toContain('full_fa');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const sysInstr = body.systemInstruction.parts[0].text;
+    expect(sysInstr).toContain('full_fa');
     // full_fa is read aloud and capped; the prompt must state a character limit and require
     // finishing sentences.
-    expect(prompt).toContain('this is what gets read aloud');
-    expect(prompt).toMatch(/UNDER \d+ characters/);
-    expect(prompt).toContain('finish the final sentence');
+    expect(sysInstr).toContain('this is what gets read aloud');
+    expect(sysInstr).toMatch(/UNDER \d+ characters/);
+    expect(sysInstr).toContain('finish the final sentence');
   });
 
   it('sends prompt with title, content, and source in request body', async () => {
@@ -90,16 +91,18 @@ describe('summarizeAndTranslate', () => {
   it('asks for a bounded 2-4 paragraph, finished summary', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'K');
-    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
-    expect(prompt).toContain('2-4 paragraphs');
-    expect(prompt).toContain('ALWAYS finish the final paragraph');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const sysInstr = body.systemInstruction.parts[0].text;
+    expect(sysInstr).toContain('2-4 paragraphs');
+    expect(sysInstr).toContain('ALWAYS finish the final paragraph');
   });
 
   it('instructs the model to preserve concrete facts', async () => {
     fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
     await summarizeAndTranslate('T', 'C', 'S', 'K');
-    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).contents[0].parts[0].text;
-    expect(prompt).toContain('Preserve every concrete fact');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const sysInstr = body.systemInstruction.parts[0].text;
+    expect(sysInstr).toContain('Preserve every concrete fact');
   });
 
   it('allows enough output tokens to avoid mid-output truncation', async () => {
@@ -107,6 +110,17 @@ describe('summarizeAndTranslate', () => {
     await summarizeAndTranslate('T', 'C', 'S', 'K');
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.generationConfig.maxOutputTokens).toBe(8192);
+  });
+
+  it('puts summarization rules in systemInstruction, not in user content', async () => {
+    fetchMock.mockResolvedValueOnce(OK_RESPONSE(VALID_RESULT));
+    await summarizeAndTranslate('MyTitle', 'MyContent', 'MySource', 'KEY');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.systemInstruction).toBeDefined();
+    expect(body.systemInstruction.parts[0].text).toContain('Persian tech news translator');
+    expect(body.systemInstruction.parts[0].text).toContain('Preserve every concrete fact');
+    // Article data stays in user content, not system instruction
+    expect(body.systemInstruction.parts[0].text).not.toContain('MyTitle');
   });
 
   it('retries on 503 and succeeds on second attempt', async () => {

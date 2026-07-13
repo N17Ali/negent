@@ -21,12 +21,17 @@ export function buildGeminiBody(
   prompt: string,
   temperature: number,
   maxOutputTokens: number,
-  responseMimeType = 'application/json'
+  responseMimeType = 'application/json',
+  systemInstruction?: string
 ): string {
-  return JSON.stringify({
+  const body: Record<string, unknown> = {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { temperature, maxOutputTokens, responseMimeType },
-  });
+  };
+  if (systemInstruction) {
+    body.systemInstruction = { parts: [{ text: systemInstruction }] };
+  }
+  return JSON.stringify(body);
 }
 
 async function callGeminiHttp(url: string, body: string, errorLabel: string): Promise<string> {

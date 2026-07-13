@@ -28,14 +28,15 @@ async function callModel(
   apiKey: string
 ): Promise<GeminiResult> {
   const prompt = buildPrompt(title, content, sourceName);
+  const systemInstruction = buildSystemInstruction();
   const url = buildGeminiUrl(model, apiKey);
-  const body = buildGeminiBody(prompt, 0.3, 8192);
+  const body = buildGeminiBody(prompt, 0.3, 8192, 'application/json', systemInstruction);
   const retry: RetryOptions = { ...RETRY, label: model };
 
   return callAndParse(url, body, parseResult, 'Gemini', retry);
 }
 
-function buildPrompt(title: string, content: string, sourceName: string): string {
+function buildSystemInstruction(): string {
   return `You are a Persian tech news translator and summarizer.
 
 ## Task
@@ -81,12 +82,21 @@ Preserve every concrete fact the article states — never flatten a specific int
 - Example: if the article says a game "broke its sales record with X million copies sold", you MUST include the "X million" — do NOT write just "hit a record" without the number
 - Never invent a figure that isn't in the source, but never drop one that is
 
-Article title: ${title}
-Article content: ${content}
-Source: ${sourceName}
+## Output format
 
 Respond in this exact JSON format (summary 2 to 4 paragraphs separated by \\n\\n and under 900 characters; full_fa the Persian reading separated by \\n\\n and under ${AUDIO_MAX_CHARS} characters; every sentence finished):
 {"summary": "paragraph 1\\n\\nparagraph 2\\n\\n...up to paragraph 4", "full_fa": "full translation paragraph 1\\n\\nparagraph 2\\n\\n...", "category": "ai", "relevance_score": 4}`;
+}
+
+function buildPrompt(title: string, content: string, sourceName: string): string {
+  return `## Article
+
+Title: ${title}
+Source: ${sourceName}
+
+## Article body
+
+${content}`;
 }
 
 function parseResult(text: string): GeminiResult {

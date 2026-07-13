@@ -42,17 +42,61 @@ async function callModel(
   apiKey: string
 ): Promise<SelectionResult> {
   const prompt = buildPrompt(candidates, recentTitles);
+  const systemInstruction = buildSystemInstruction();
   const url = buildGeminiUrl(model, apiKey);
-  const body = buildGeminiBody(prompt, 0.2, 16384);
+  const body = buildGeminiBody(prompt, 0.2, 16384, 'application/json', systemInstruction);
   const retry: RetryOptions = { ...RETRY, label: model };
 
   return callAndParse(url, body, (text) => parseSelection(text, candidates), 'selector', retry);
 }
 
+function buildSystemInstruction(): string {
+  return `You are a tech news curator for a sophisticated engineering audience. Your job: from a batch of candidate articles, select at most ${SELECT_TOP_N} that are genuinely important and worth knowing about today.
+
+# Selection bar
+
+An article qualifies ONLY if a well-informed engineer would consider it real, consequential news worth hearing about today. Judge each article on its own merits, regardless of source.
+
+## Clear YES — qualifies
+- **Major releases**: new foundation models (GPT-5, Claude 4, etc.), major framework/tool releases (React 19, TypeScript 5.5, Node 22), major game releases from recognized studios.
+- **Real breakthroughs**: new SOTA on major benchmarks, a genuinely novel capability, serious security issues (real CVE with impact).
+- **Industry shifts**: meaningful policy/safety developments, government regulation, a major company strategic pivot.
+
+## Clear NO — does not qualify
+- Tutorials, how-tos, tips, "X vs Y" format-conversion comparisons.
+- Opinion pieces, editorials, listicles, roundups.
+- Business/funding/fundraising/acquisition news.
+- Speculation, rumors, "X company might do Y."
+- Personal blog posts, "I built X" showcases, GitHub side projects.
+- Incremental tweaks, minor version bumps, patches.
+- Prompt/token tricks, MCP servers, agent frameworks, coding assistants, wrapper tools.
+- Marketing/PR, clickbait.
+
+## Taste examples
+
+WANT — novel and technically deep:
+- "A linter that catches the security bugs AI assistants keep writing" — solves a real new problem.
+- "A single-file C engine streaming a 744B MoE model on 25GB consumer RAM" — non-obvious engineering.
+
+DO NOT WANT — derivative or shallow:
+- "Open-source spreadsheet app as a Google Sheets alternative" — me-too clone.
+- "JSON to Python dataclass/TypedDict/Pydantic" — tutorial/format-conversion.
+- "Toon: the JSON trick that cut my LLM prompt tokens by half" — prompt tip blog post.
+- "SkillScript: a scripting language" — GitHub side project announcement.
+
+# Quantity
+
+Do NOT try to fill ${SELECT_TOP_N} slots. Select only articles that clear the bar. Most batches yield 0–1. An empty selection is the correct answer when nothing qualifies.
+
+# Deduplication
+
+If multiple articles cover the same story, select only the single best one.`;
+}
+
 function buildPrompt(candidates: ArticleCandidate[], recentTitles: string[]): string {
-  const recentList =
+  const recentBlock =
     recentTitles.length > 0
-      ? `\n\nAlready delivered (do NOT select these or any article covering the same story):\n${recentTitles.map((t) => `- ${t}`).join('\n')}`
+      ? `\n\n## Already delivered (do NOT select these or any article covering the same story)\n${recentTitles.map((t) => `- ${t}`).join('\n')}`
       : '';
 
   const articleList = candidates
@@ -62,57 +106,16 @@ function buildPrompt(candidates: ArticleCandidate[], recentTitles: string[]): st
     )
     .join(',\n');
 
-return `You are a strict tech news curator. Select AT MOST ${SELECT_TOP_N} articles — only genuinely important, must-know news for a sophisticated tech audience. Be strict. The default answer is NO; say YES only when the story is clearly consequential or technically novel.
-
-## The bar (only clear YES stories qualify)
-
-An article qualifies if a well-informed engineer would consider it real, consequential news that they'd want to hear about today:
-- **Games** — a major release, a significant delay, or a headline announcement from a major studio (or a genuinely landmark indie moment). Not roundups, reviews, sales, patches, or minor updates.
-- **AI** — a genuinely new foundation model (GPT-5, Claude 4, Gemini 2, Llama 4, etc.), a real capability breakthrough (new SOTA on major benchmarks), a major product/API launch from a recognized lab (OpenAI, Anthropic, Google, Meta, xAI, Mistral), or a significant policy/safety development (government regulation, major safety research). NOT: incremental tweaks, fine-tunes, wrappers, agent frameworks, MCP servers, coding assistants, prompt tricks, token-saving tips, or "X company might do Y".
-- **Programming & projects** — a major framework/tool release (React 19, TypeScript 5.5, Node 22, etc.), a serious security issue (real CVE with impact), a meaningful industry shift, OR a genuinely novel, technically deep tool/project (clever engineering, a new capability, a non-obvious hack). NOT tutorials, tips, opinion, format-conversion or "how to convert X to Y" comparisons, minor version bumps, personal blog posts, or GitHub repo announcements.
-
-## Source quality
-
-- Major publications (TechCrunch, The Verge, Ars Technica, official company blogs) → higher trust
-- Hacker News front page → higher trust — prefer picking the single most important HN story of the day
-- personal blogs, Medium, Substack → low trust; do not select tutorials or "I built X" posts from these
-- GitHub repo announcements → do not select. These are personal project showcases, not news.
-- Reddit/Hacker News comments/discussions → never select.
-
-## Taste (learn from these examples)
-
-WANT — technically deep and NOVEL. The reader learns something or sees a clever hack:
-- "I built a linter that catches the security bugs AI assistants keep writing" — a tool solving a genuinely new, real problem.
-- A single-file dependency-free C engine that streams a 744B-parameter MoE model on 25GB of consumer RAM — non-obvious, impressive engineering.
-
-DO NOT WANT — generic, derivative, or non-technical, even if well-written or popular:
-- "I built an open-source spreadsheet app as an alternative to Google Sheets" — a me-too clone of an existing product; no novelty.
-- "JSON to Python dataclass / TypedDict / or Pydantic" — a tutorial / format-conversion / how-to comparison.
-- "Paris-based AI voice startup raises $100M seed backed by Nvidia" — business/funding news. Funding rounds, valuations, raises, and acquisitions are NOT interesting even when confirmed.
-- "Toon: the JSON trick that cut my LLM prompt tokens by half" — a personal blog post / prompt tip; not consequential news.
-- "SkillScript: a scripting language" — a GitHub side project announcement; not a major release from an established project.
-
-The "I built X" framing is usually bad — a novel tool that attacks a real problem cleverly is a YES; a clone, wrapper, tutorial, prompt trick, or personal project showcase is a NO.
-
-## Reject
-
-Say NO to: opinion/editorial, tutorials/how-tos/tips, format-conversion or "X vs Y" comparisons, listicles and roundups, speculation and rumors, business/funding/fundraising/acquisition news, marketing/PR fluff, derivative clones of existing products, incremental or minor updates, clickbait, personal blog posts, GitHub side projects, MCP servers, agent frameworks, coding assistants, prompt/token tricks, and anything you're unsure about. If it's not important AND (consequential OR technically novel), it does not qualify.
-
-## Quantity: prefer fewer, zero is fine
-
-Do NOT try to fill ${SELECT_TOP_N} slots. Only select an article if it clears the bar above on its own merits. Most batches should yield 0–1 selections. An empty selection is the correct answer when nothing is important enough — never pad the list with mediocre stories to reach a number.
-
-## Deduplicate (important)
-
-Several sources often cover the SAME story. Never select more than one article about the same event — pick the single best (most detailed / most authoritative) one and drop the near-duplicates, even if their titles are worded differently.
-
-## Articles to choose from (${candidates.length} total):
+  return `## Articles (${candidates.length} total)
 [
 ${articleList}
-]
-${recentList}
+]${recentBlock}
 
-Select up to ${SELECT_TOP_N} articles for "selected" — fewer (or none) is expected and correct when few clear the bar. Additionally, if there are OTHER articles that genuinely clear the strict bar above but lost their slot only because you were already at ${SELECT_TOP_N}, list just their ids in "bucket" so they can be reconsidered next time. The bucket must hold ONLY articles you'd have selected outright — if in doubt, leave it out. Most runs should have an empty bucket. Never put the same id in both lists.
+## Task
+
+Select up to ${SELECT_TOP_N} articles that clear the bar in the system instruction. For each, give a one-line reason.
+
+Additionally, if OTHER articles clear the bar but lost their slot only because you were already at ${SELECT_TOP_N}, list their ids in "bucket" so they can be reconsidered next run. The bucket must hold ONLY articles you'd select outright — if in doubt, leave it out.
 
 Respond in this exact JSON format:
 {"selected": [{"id": 123, "reason": "major game release"}, {"id": 456, "reason": "new AI model launch"}], "bucket": [789, 1011]}`;
