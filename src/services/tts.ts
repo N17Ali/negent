@@ -71,6 +71,7 @@ export async function generateAudio(
   console.log(`tts: generating audio for ${trimmed.length} chars in ${chunks.length} chunk(s)`);
 
   for (let i = 0; i < chunks.length; i++) {
+    console.log(`tts: starting chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
     let pcm = await synthesizeChunk(chunks[i], apiKey);
     if (!pcm) {
       // The Live API occasionally stalls a single turn (generation timeout) even though the
@@ -157,6 +158,7 @@ export function chunkText(text: string, maxChars: number): string[] {
 async function synthesizeChunk(text: string, apiKey: string): Promise<Uint8Array | null> {
   let ws: WebSocket;
   try {
+    console.log(`tts: connecting to Live API...`);
     const resp = await fetch(`${WS_URL}?key=${apiKey}`, {
       headers: { Upgrade: 'websocket' },
     });
@@ -167,6 +169,7 @@ async function synthesizeChunk(text: string, apiKey: string): Promise<Uint8Array
     }
     socket.accept();
     ws = socket;
+    console.log(`tts: WebSocket connected`);
   } catch (err) {
     console.error('tts: connect failed:', err instanceof Error ? err.message : err);
     return null;
@@ -204,6 +207,7 @@ function runSession(ws: WebSocket, text: string): Promise<Uint8Array | null> {
       try {
         ws.close();
       } catch { }
+      console.log(`tts: session finished, pcmChunks=${pcmChunks.length}`);
       resolve(pcmChunks.length ? concatBytes(pcmChunks) : null);
     }
 
@@ -234,6 +238,7 @@ function runSession(ws: WebSocket, text: string): Promise<Uint8Array | null> {
       if (msg.setupComplete) {
         setupDone = true;
         clearTimeout(connectTimer);
+        console.log(`tts: setup complete, sending text turn`);
         ws.send(
           JSON.stringify({
             clientContent: {
@@ -263,7 +268,10 @@ function runSession(ws: WebSocket, text: string): Promise<Uint8Array | null> {
         console.warn(`tts: unexpected server frame: ${raw.slice(0, 500)}`);
       }
 
-      if (done) finish();
+      if (done) {
+        console.log(`tts: turn complete, pcmChunks=${pcmChunks.length}`);
+        finish();
+      }
     });
 
     ws.addEventListener('close', (event: any) => {
@@ -278,6 +286,7 @@ function runSession(ws: WebSocket, text: string): Promise<Uint8Array | null> {
     ws.addEventListener('error', () => fail(new Error('websocket error')));
 
     // Kick off the session.
+    console.log(`tts: sending setup...`);
     ws.send(
       JSON.stringify({
         setup: {
