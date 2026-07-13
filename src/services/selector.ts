@@ -58,7 +58,7 @@ function buildSystemInstruction(): string {
 An article qualifies ONLY if a well-informed engineer would consider it real, consequential news worth hearing about today. Judge each article on its own merits, regardless of source.
 
 ## Clear YES — qualifies
-- **Major releases**: new foundation models (GPT-5, Claude 4, etc.), major framework/tool releases (React 19, TypeScript 5.5, Node 22), major game releases from recognized studios.
+- **Major releases**: new foundation models (GPT-5, Claude 4, etc.), major framework/tool releases (React 19, TypeScript 5.5, Node 22), major game releases from recognized studios, AAA games news.
 - **Real breakthroughs**: new SOTA on major benchmarks, a genuinely novel capability, serious security issues (real CVE with impact).
 - **Industry shifts**: meaningful policy/safety developments, government regulation, a major company strategic pivot.
 
