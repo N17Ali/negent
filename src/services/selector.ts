@@ -74,19 +74,22 @@ An article qualifies ONLY if a well-informed engineer would consider it real, co
 
 ## Taste examples
 
-WANT — novel and technically deep:
-- "A linter that catches the security bugs AI assistants keep writing" — solves a real new problem.
-- "A single-file C engine streaming a 744B MoE model on 25GB consumer RAM" — non-obvious engineering.
+WANT — real, consequential news a sharp engineer would want today:
+- "A single-file C engine streaming a 744B MoE model on 25GB consumer RAM" — non-obvious engineering with a genuinely novel result.
+- "TypeScript's compiler rewritten in Go, 10x faster builds, shipping in 7.0" — a major release from a tool people actually use.
+- "Rockstar locks in GTA 6 release date after the delay" — real AAA game news with a concrete, consequential fact.
 
-DO NOT WANT — derivative or shallow:
-- "Open-source spreadsheet app as a Google Sheets alternative" — me-too clone.
-- "JSON to Python dataclass/TypedDict/Pydantic" — tutorial/format-conversion.
-- "Toon: the JSON trick that cut my LLM prompt tokens by half" — prompt tip blog post.
-- "SkillScript: a scripting language" — GitHub side project announcement.
+DO NOT WANT — narrow, incremental, or not-really-news:
+- "Automatic differentiation in LFortran via the Enzyme plugin" — niche library-integration deep-dive; matters to almost no one.
+- "We benchmarked Apple's new Speech API against Whisper" — vendor/company benchmark blog post, basically marketing.
+- "MIT's new method flags models trained on abuse imagery" — incremental academic research announcement, not a shipped capability or breakthrough.
+- "openai/codex #28058: agent hangs on nested tool calls" — a GitHub issue/PR thread, not news.
+- "OpenAI mandates hardware passkeys for staff ChatGPT logins" — internal corporate ops/security-policy PR, no consequence outside the company.
+- "New gameplay trailer for an indie roguelike" — routine trailer/listicle, not a real release or announcement.
 
 # Quantity
 
-Do NOT try to fill ${SELECT_TOP_N} slots. Select only articles that clear the bar. Most batches yield 0–1. An empty selection is the correct answer when nothing qualifies.
+Do NOT try to fill ${SELECT_TOP_N} slots. Select only articles that clear the bar. Many batches yield 0–2, and an empty selection is the correct answer when nothing qualifies. When a story genuinely clears the bar, include it even if it's from a different domain than the others — a strong game or systems story should not be edged out just because AI stories are also present.
 
 # Deduplication
 
