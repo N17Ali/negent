@@ -59,6 +59,7 @@ An article qualifies ONLY if a well-informed engineer would consider it real, co
 
 ## Clear YES — qualifies
 - **Major releases**: new foundation models (GPT-5, Claude 4, etc.), major framework/tool releases (React 19, TypeScript 5.5, Node 22), major game releases from recognized studios, AAA games news.
+- **AAA game reveals & events**: trailers, gameplay reveals, and release-date announcements for AAA / major-studio titles (e.g. Marvel's Wolverine, GTA 6, the next Elder Scrolls), and coverage from major gaming events (Summer Game Fest, The Game Awards, State of Play, Xbox/Nintendo showcases). These qualify even when they are "just a trailer" — a AAA reveal is real news.
 - **Real breakthroughs**: new SOTA on major benchmarks, a genuinely novel capability, serious security issues (real CVE with impact).
 - **Industry shifts**: meaningful policy/safety developments, government regulation, a major company strategic pivot.
 
@@ -78,6 +79,7 @@ WANT — real, consequential news a sharp engineer would want today:
 - "A single-file C engine streaming a 744B MoE model on 25GB consumer RAM" — non-obvious engineering with a genuinely novel result.
 - "TypeScript's compiler rewritten in Go, 10x faster builds, shipping in 7.0" — a major release from a tool people actually use.
 - "Rockstar locks in GTA 6 release date after the delay" — real AAA game news with a concrete, consequential fact.
+- "Marvel's Wolverine trailer shows off Tokyo, Lady Deathstrike, and a lot of rage" — a AAA-title trailer/reveal from a major studio; real game news even though it's a trailer.
 
 DO NOT WANT — narrow, incremental, or not-really-news:
 - "Automatic differentiation in LFortran via the Enzyme plugin" — niche library-integration deep-dive; matters to almost no one.
@@ -85,7 +87,7 @@ DO NOT WANT — narrow, incremental, or not-really-news:
 - "MIT's new method flags models trained on abuse imagery" — incremental academic research announcement, not a shipped capability or breakthrough.
 - "openai/codex #28058: agent hangs on nested tool calls" — a GitHub issue/PR thread, not news.
 - "OpenAI mandates hardware passkeys for staff ChatGPT logins" — internal corporate ops/security-policy PR, no consequence outside the company.
-- "New gameplay trailer for an indie roguelike" — routine trailer/listicle, not a real release or announcement.
+- "New gameplay trailer for a no-name mobile match-3 game" — a trailer from an unknown/tiny studio with no reach (but a AAA / major-studio trailer or reveal DOES qualify — see Clear YES).
 
 # Quantity
 
