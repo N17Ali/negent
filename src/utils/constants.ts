@@ -2,7 +2,7 @@ export const MAX_CONTENT_LENGTH = 2000;
 export const MAX_ARTICLE_TEXT_LENGTH = 8000;
 export const MAX_CAPTION_LENGTH = 1020;
 export const MAX_MESSAGE_LENGTH = 4090;
-export const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+export const GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const GEMMA_MODEL = 'gemma-4-31b-it';
 
 export const BATCH_SELECT_SIZE = 150;
@@ -24,7 +24,7 @@ export const RECENT_DELIVERED_TITLES = 50;
 // if this fails. Flip SEND_AUDIO to false to disable without touching the pipeline.
 export const SEND_AUDIO = true;
 export const AUDIO_MODEL = 'gemini-2.5-flash-native-audio-latest';
-export const AUDIO_VOICE = 'Puck'; // upbeat male voice
+export const AUDIO_VOICE = 'Fenrir'; // upbeat male voice
 export const AUDIO_SAMPLE_RATE = 24000; // Live API returns 16-bit mono PCM at 24kHz
 export const AUDIO_MAX_CHARS = 1500; // hard cap on total text read aloud. On the free Workers
 // plan a single invocation's CPU budget can't decode/concat the PCM for a long reading — a
